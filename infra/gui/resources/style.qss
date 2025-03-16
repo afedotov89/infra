@@ -1,0 +1,249 @@
+/* Основные стили приложения */
+
+/* Глобальные стили */
+QWidget {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* Главное окно */
+QMainWindow {
+    background-color: #f5f5f7;
+}
+
+/* Для темной темы */
+QMainWindow[darkMode="true"] {
+    background-color: #1e1e1e;
+    color: #ffffff;
+}
+
+/* Заголовки групп */
+QGroupBox {
+    font-weight: bold;
+    border: 1px solid #cccccc;
+    border-radius: 6px;
+    margin-top: 1.5ex;
+    padding-top: 1ex;
+    background-color: #ffffff;
+}
+
+QGroupBox[darkMode="true"] {
+    border: 1px solid #3a3a3a;
+    background-color: #2d2d2d;
+    color: #ffffff;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+}
+
+/* Боковая панель навигации */
+QTreeWidget {
+    background-color: #ffffff;
+    border: none;
+    border-right: 1px solid #e0e0e0;
+    font-size: 14px;
+}
+
+QTreeWidget[darkMode="true"] {
+    background-color: #252525;
+    border-right: 1px solid #3a3a3a;
+    color: #ffffff;
+}
+
+QTreeWidget::item {
+    height: 28px;
+    padding: 4px 0;
+}
+
+QTreeWidget::item:selected {
+    background-color: #0070f3;
+    color: white;
+    border-radius: 4px;
+}
+
+QTreeWidget::item:hover:!selected {
+    background-color: #e8f0fe;
+    border-radius: 4px;
+}
+
+QTreeWidget::item:hover:!selected[darkMode="true"] {
+    background-color: #3a3a3a;
+}
+
+/* Стили кнопок */
+QPushButton {
+    background-color: #0070f3;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #0057c1;
+}
+
+QPushButton:pressed {
+    background-color: #004599;
+}
+
+QPushButton[secondary="true"] {
+    background-color: transparent;
+    color: #0070f3;
+    border: 1px solid #0070f3;
+}
+
+QPushButton[secondary="true"]:hover {
+    background-color: #e8f0fe;
+}
+
+/* Текстовые поля */
+QLineEdit {
+    border: 1px solid #cccccc;
+    border-radius: 4px;
+    padding: 6px;
+    background-color: #ffffff;
+}
+
+QLineEdit:focus {
+    border: 1px solid #0070f3;
+}
+
+QLineEdit[darkMode="true"] {
+    background-color: #2d2d2d;
+    border: 1px solid #3a3a3a;
+    color: #ffffff;
+}
+
+/* Выпадающие списки */
+QComboBox {
+    border: 1px solid #cccccc;
+    border-radius: 4px;
+    padding: 6px;
+    background-color: #ffffff;
+}
+
+QComboBox:focus {
+    border: 1px solid #0070f3;
+}
+
+QComboBox[darkMode="true"] {
+    background-color: #2d2d2d;
+    border: 1px solid #3a3a3a;
+    color: #ffffff;
+}
+
+/* Чекбоксы и радиокнопки */
+QCheckBox, QRadioButton {
+    spacing: 8px;
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 18px;
+    height: 18px;
+}
+
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+    image: url(:/images/checked.png);
+}
+
+/* Статус бар */
+QStatusBar {
+    background-color: #f5f5f7;
+    border-top: 1px solid #e0e0e0;
+}
+
+QStatusBar[darkMode="true"] {
+    background-color: #252525;
+    border-top: 1px solid #3a3a3a;
+    color: #ffffff;
+}
+
+/* Стили для лога */
+LogWidget QTextEdit {
+    font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    background-color: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+}
+
+LogWidget QTextEdit[darkMode="true"] {
+    background-color: #252525;
+    border: 1px solid #3a3a3a;
+    color: #ffffff;
+}
+
+/* Стили для разделителей */
+QSplitter::handle {
+    background-color: #e0e0e0;
+}
+
+QSplitter::handle:horizontal {
+    width: 1px;
+}
+
+QSplitter::handle[darkMode="true"] {
+    background-color: #3a3a3a;
+}
+
+/* Скролл бары */
+QScrollBar:vertical {
+    border: none;
+    background: #f5f5f7;
+    width: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical {
+    background: #c1c1c1;
+    min-height: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #a1a1a1;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background: #f5f5f7;
+    height: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #c1c1c1;
+    min-width: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #a1a1a1;
+}
+
+QScrollBar[darkMode="true"] {
+    background: #252525;
+}
+
+QScrollBar::handle[darkMode="true"] {
+    background: #606060;
+}
+
+QScrollBar::handle:hover[darkMode="true"] {
+    background: #808080;
+}
+
+/* Убираем стандартные кнопки в скроллбаре */
+QScrollBar::add-line, QScrollBar::sub-line {
+    background: none;
+    border: none;
+}
+
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: none;
+} 
