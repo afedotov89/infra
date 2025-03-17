@@ -15,9 +15,7 @@ logger = logging.getLogger(__name__)
 # Base directory of the project
 BASE_DIR = Path(__file__).parent.parent
 
-# Load environment variables from .env file
-load_dotenv(BASE_DIR / ".env")
-
+# Загрузка .env выполняется в методе _load_config при первом обращении к конфигурации
 
 class ConfigError(Exception):
     """Exception raised for configuration errors."""
@@ -42,7 +40,13 @@ class Config:
             Dict with configuration parameters
         """
         if cls._config_data is None:
+            # Получаем путь к .env файлу из переменной окружения или используем значение по умолчанию
             env_file = os.environ.get("INFRA_ENV_FILE", ".env")
+            
+            # Если путь не абсолютный, считаем его относительно корня проекта
+            if not os.path.isabs(env_file):
+                env_file = os.path.join(BASE_DIR, env_file)
+                
             logger.debug(f"Loading configuration from {env_file}")
             
             # Load from .env file

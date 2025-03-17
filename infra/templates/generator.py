@@ -40,13 +40,7 @@ def list_available_templates() -> List[str]:
     
     # Use only physically present templates
     templates = physical_templates
-    
-    # Custom templates defined in config
-    urls = Config.get_template_urls()
-    for template_name, url in urls.items():
-        if url and template_name not in templates:
-            templates.append(template_name)
-    
+        
     logger.debug(f"Available templates: {templates}")        
     return templates
 

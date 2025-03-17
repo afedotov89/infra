@@ -533,7 +533,13 @@ def setup_project(
         
         # Step 4: Create database (moved earlier in the process)
         logger.debug("Step 4: Creating database")
-        final_db_name = _create_database(name, db_type, db_name, log)
+        if any(tech.lower() in ['postgres', 'postgresql'] for tech in technologies):
+            logger.debug("PostgreSQL is in technologies list, creating database")
+            final_db_name = _create_database(name, db_type, db_name, log)
+        else:
+            logger.debug("PostgreSQL is not in technologies list, skipping database creation")
+            log("ℹ️ Skipping database creation as PostgreSQL is not in technologies list")
+            final_db_name = db_name or name
         
         # Step 5: Set up GitHub secrets based on workflow files
         logger.debug("Step 5: Setting up GitHub secrets")

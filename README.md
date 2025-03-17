@@ -187,7 +187,17 @@ infra/
 The modular architecture makes it easy to add new functionality:
 
 1. **New Cloud Providers**: Add a new module under `infra/providers/cloud/`
-2. **New Project Templates**: Add templates to `infra/templates/`
+2. **New Project Templates**: 
+   - Add template files to `infra/templates/` directory
+   - Register the template in `infra/cli.py` by adding it to the `PROJECT_TEMPLATES` dictionary with the following structure:
+     ```python
+     "template_name": {
+         "description": "Short description of template",
+         "technologies": ["tech1", "tech2", "tech3"],
+         "details": "Detailed description of the template and its components"
+     }
+     ```
+   - Ensure all used technologies are reflected in both the template files and code registration
 3. **New AI Agents**: Implement new agents in `infra/agents/`
 4. **New CLI Commands**: Extend existing command groups or add new ones in `infra/cli.py`
 

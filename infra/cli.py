@@ -32,6 +32,11 @@ PROJECT_TEMPLATES = {
         "description": "Full-stack web application",
         "technologies": ["react", "django", "postgres"],
         "details": "React frontend with Django backend and Postgres database"
+    },
+    "zero": {
+        "description": "Empty project template",
+        "technologies": [],
+        "details": "A blank project structure without any predefined technologies or dependencies"
     }
 }
 
