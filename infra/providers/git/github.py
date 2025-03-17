@@ -266,7 +266,7 @@ def setup_cicd(
                     
                 # Try to get the secret value from config
                 try:
-                    secret_value = Config.get(secret_name, required=False)
+                    secret_value = Config.get(secret_name, default=None)
                     if secret_value:
                         logger.info(f"Setting required secret from config: {secret_name}")
                         repo.create_secret(secret_name, secret_value)
