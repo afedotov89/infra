@@ -350,6 +350,7 @@ def _setup_cicd_variables(name: str, log_func: Callable) -> None:
 def _create_database(name: str, db_type: str, db_name: Optional[str], log_func: Callable) -> str:
     """
     Step 5: Create a database for the project.
+    This step is skipped if DATABASE_URL secret already exists in GitHub.
     
     Args:
         name: Project name
@@ -361,10 +362,42 @@ def _create_database(name: str, db_type: str, db_name: Optional[str], log_func: 
         The name of the created database
     """
     db_name = db_name or name
-    log_func("🔄 Creating database...")
-    # from infra.providers.cloud.yandex.db import create_database
-    # create_database(db_name, db_type)
-    log_func(f"✅ Database '{db_name}' created")
+    log_func("🔄 Checking if database needs to be created...")
+    
+    try:
+        # Check if DATABASE_URL secret already exists in GitHub
+        from infra.providers.git.github import get_repository_secrets
+        
+        # Get existing secrets
+        existing_secrets = get_repository_secrets(name)
+        
+        if "DATABASE_URL" in existing_secrets:
+            log_func(f"✅ DATABASE_URL secret already exists for project {name}")
+            log_func(f"   Skipping database creation step to preserve existing configuration")
+            return db_name
+        
+        log_func("🔄 Creating database...")
+        from infra.providers.cloud.yandex.db.postgres import create_database
+        from infra.config import Config
+        
+        # Create database in Yandex Cloud PostgreSQL
+        db_info = create_database(db_name, db_type)
+        
+        # Save database info for later use by other operations
+        Config.save_database_info(name, db_info)
+        
+        log_func(f"✅ Database '{db_name}' created")
+        log_func(f"   Host: {db_info['host']}")
+        log_func(f"   Username: {db_info['username']}")
+        
+        # Add a note about DATABASE_URL being added to GitHub secrets
+        log_func(f"   DATABASE_URL will be added to GitHub secrets")
+        
+    except Exception as e:
+        logger.error(f"Failed to create database: {str(e)}")
+        log_func(f"⚠️  Database creation failed: {str(e)}")
+        log_func(f"   Continuing with project setup...")
+    
     return db_name
 
 
@@ -437,10 +470,10 @@ def setup_project(
     1. Creates a GitHub repository
     2. Checks local project directory
     3. Creates or initializes local project with template files
-    4. Sets up GitHub secrets based on workflow needs
-    5. Pushes code to GitHub
-    6. Sets up CI/CD variables
-    7. Creates database in the cloud
+    4. Creates database in the cloud
+    5. Sets up GitHub secrets based on workflow needs and DB credentials
+    6. Pushes code to GitHub
+    7. Sets up CI/CD variables
     8. Sets up container infrastructure
     9. Finalizes project setup
     
@@ -498,21 +531,21 @@ def setup_project(
             template_name
         )
         
-        # Step 4: Set up GitHub secrets based on workflow files
-        logger.debug("Step 4: Setting up GitHub secrets")
+        # Step 4: Create database (moved earlier in the process)
+        logger.debug("Step 4: Creating database")
+        final_db_name = _create_database(name, db_type, db_name, log)
+        
+        # Step 5: Set up GitHub secrets based on workflow files
+        logger.debug("Step 5: Setting up GitHub secrets")
         _setup_github_secrets(project_dir, name, log)
         
-        # Step 5: Push code to GitHub repository
-        logger.debug("Step 5: Pushing to GitHub repository")
+        # Step 6: Push code to GitHub repository
+        logger.debug("Step 6: Pushing to GitHub repository")
         _push_to_remote(project_dir, repo.clone_url, git_already_initialized, log)
         
-        # Step 6: Set up CI/CD variables
-        logger.debug("Step 6: Setting up CI/CD variables")
+        # Step 7: Set up CI/CD variables
+        logger.debug("Step 7: Setting up CI/CD variables")
         _setup_cicd_variables(name, log)
-        
-        # Step 7: Create database
-        logger.debug("Step 7: Creating database")
-        final_db_name = _create_database(name, db_type, db_name, log)
         
         # Step 8: Set up container infrastructure
         logger.debug("Step 8: Setting up container infrastructure")

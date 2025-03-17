@@ -3,6 +3,7 @@ GitHub API integration module.
 """
 
 import logging
+import os
 from typing import Dict, List, Optional
 
 from github import Github, GithubException, Repository
@@ -92,37 +93,6 @@ def create_repository(
         raise GitHubError(f"Unexpected error: {str(e)}")
 
 
-def generate_dynamic_secrets(repo_name: str) -> Dict[str, str]:
-    """
-    Generate dynamic secrets that are not in .env but can be derived from project name
-    or generated dynamically.
-    
-    Args:
-        repo_name: Repository/project name
-        
-    Returns:
-        Dictionary of secrets that were dynamically generated
-    """
-    import random
-    import string
-    
-    dynamic_secrets = {}
-    
-    # Container name for Yandex Cloud Serverless Containers
-    dynamic_secrets["YC_CONTAINER_NAME"] = f"{repo_name}-container"
-    
-    # API Gateway name for Yandex Cloud API Gateway
-    dynamic_secrets["YC_API_GATEWAY_NAME"] = f"{repo_name}-gateway"
-    
-    # Generate Django secret key
-    # Using a simple but secure method similar to what Django uses
-    chars = string.ascii_letters + string.digits + "!@#$%^&*(-_=+)"
-    django_secret_key = ''.join(random.choice(chars) for _ in range(50))
-    dynamic_secrets["DJANGO_SECRET_KEY"] = django_secret_key
-    
-    return dynamic_secrets
-
-
 def get_repository_secrets(repo_name: str) -> List[str]:
     """
     Get the list of existing secret names for a repository.
@@ -150,6 +120,83 @@ def get_repository_secrets(repo_name: str) -> List[str]:
     except Exception as e:
         logger.error(f"Unexpected error getting repository secrets: {str(e)}")
         raise GitHubError(f"Unexpected error getting repository secrets: {str(e)}")
+
+
+def set_repository_secret(repo_name: str, secret_name: str, secret_value: str) -> None:
+    """
+    Set a secret in a GitHub repository.
+    
+    Args:
+        repo_name: Repository name
+        secret_name: Secret name
+        secret_value: Secret value
+        
+    Raises:
+        GitHubError: If setting secret fails
+    """
+    client = get_github_client()
+    username = Config.get_github_credentials().get("username")
+    
+    if not username:
+        logger.error("GitHub username not found in configuration")
+        raise GitHubError("GitHub username is required for repository operations")
+    
+    try:
+        repo = client.get_user().get_repo(repo_name)
+        repo.create_secret(secret_name, secret_value)
+        logger.info(f"Set secret {secret_name} in repository {repo_name}")
+    except GithubException as e:
+        logger.error(f"GitHub API error: {str(e)}")
+        raise GitHubError(f"Failed to set repository secret: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        raise GitHubError(f"Unexpected error: {str(e)}")
+
+
+def _get_dynamic_database_url(repo_name: str) -> Optional[str]:
+    """
+    Get the DATABASE_URL from the database info for the repository.
+    
+    Args:
+        repo_name: Repository name
+        
+    Returns:
+        DATABASE_URL or None if not available
+    """
+    try:
+        from infra.config import Config
+        
+        # Get database info from configuration
+        database_info = Config.get_database_info(repo_name)
+        
+        if database_info and "database_url" in database_info:
+            return database_info["database_url"]
+    except Exception as e:
+        logger.warning(f"Could not get DATABASE_URL from database info: {str(e)}")
+    
+    return None
+
+
+def generate_dynamic_secrets(repo_name: str) -> Dict[str, str]:
+    """
+    Generate dynamic secrets for a GitHub repository.
+    
+    Args:
+        repo_name: Repository name
+        
+    Returns:
+        Dictionary of secret name to value
+    """
+    secrets = {}
+    
+    # Add DATABASE_URL from database info
+    database_url = _get_dynamic_database_url(repo_name)
+    if database_url:
+        secrets["DATABASE_URL"] = database_url
+    
+    # Add other dynamic secrets as needed
+    
+    return secrets
 
 
 def setup_cicd(

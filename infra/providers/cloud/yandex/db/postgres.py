@@ -1,27 +1,16 @@
 """
-Yandex Cloud PostgreSQL database management.
+Functions for managing PostgreSQL databases in Yandex Cloud.
 """
 
 import logging
-import time
-from typing import Dict, List, Optional
-
-import yandexcloud
-from yandex.cloud.mdb.postgresql.v1.cluster_pb2 import Cluster
-from yandex.cloud.mdb.postgresql.v1.cluster_service_pb2 import (
-    CreateClusterRequest, DeleteClusterRequest, ListClustersRequest
-)
-from yandex.cloud.mdb.postgresql.v1.cluster_service_pb2_grpc import ClusterServiceStub
-from yandex.cloud.mdb.postgresql.v1.database_pb2 import Database
-from yandex.cloud.mdb.postgresql.v1.database_service_pb2 import (
-    CreateDatabaseRequest, DeleteDatabaseRequest, ListDatabasesRequest
-)
-from yandex.cloud.mdb.postgresql.v1.database_service_pb2_grpc import DatabaseServiceStub
-from yandex.cloud.mdb.postgresql.v1.user_pb2 import User, Permission
-from yandex.cloud.mdb.postgresql.v1.user_service_pb2 import (
-    CreateUserRequest, DeleteUserRequest, ListUsersRequest
-)
-from yandex.cloud.mdb.postgresql.v1.user_service_pb2_grpc import UserServiceStub
+import subprocess
+import os
+import random
+import string
+import json
+import tempfile
+import atexit
+from typing import Dict, Any, Tuple
 
 from infra.config import Config
 
@@ -29,227 +18,442 @@ logger = logging.getLogger(__name__)
 
 
 class YandexCloudDBError(Exception):
-    """Exception raised for Yandex Cloud database errors."""
+    """Exception raised for errors in Yandex Cloud database operations."""
     pass
 
 
-def get_yc_sdk() -> yandexcloud.SDK:
+def generate_secure_password(length: int = 16) -> str:
     """
-    Initialize and return a Yandex Cloud SDK.
-    
-    Returns:
-        yandexcloud.SDK: Initialized SDK
-        
-    Raises:
-        YandexCloudDBError: If authentication fails
-    """
-    credentials = Config.get_yandex_cloud_credentials()
-    
-    try:
-        # Initialize SDK with OAuth token
-        return yandexcloud.SDK(token=credentials["oauth_token"])
-    except Exception as e:
-        logger.error(f"Failed to initialize Yandex Cloud SDK: {str(e)}")
-        raise YandexCloudDBError(f"Yandex Cloud authentication failed: {str(e)}")
-
-
-def create_database(
-    name: str, 
-    db_type: str = "postgres", 
-    version: str = "13", 
-    environment: str = "PRODUCTION",
-    tier_type: str = "s2.micro",  # Smallest tier
-    disk_size: int = 10,  # GB
-    disk_type: str = "network-ssd",
-    wait_for_ready: bool = True,
-    timeout: int = 600,  # seconds
-) -> Cluster:
-    """
-    Create a PostgreSQL database cluster in Yandex Cloud.
+    Generate a secure random password.
     
     Args:
-        name: Database cluster name
-        db_type: Database type (postgres)
-        version: PostgreSQL version
-        environment: PRODUCTION or PRESTABLE
-        tier_type: Resource tier (s2.micro, etc.)
-        disk_size: Disk size in GB
-        disk_type: Type of disk (network-ssd, etc.)
-        wait_for_ready: Whether to wait for the cluster to be ready
-        timeout: Timeout in seconds for waiting
+        length: Length of the password (default: 16)
         
     Returns:
-        Cluster: The created database cluster
+        A secure random password string
+    """
+    # Define character sets
+    lowercase = string.ascii_lowercase
+    uppercase = string.ascii_uppercase
+    digits = string.digits
+    special_chars = "!@#$%^&*()-_=+[]{}|;:,.<>?/"
+    
+    # Ensure at least one character from each set
+    password = [
+        random.choice(lowercase),
+        random.choice(uppercase),
+        random.choice(digits),
+        random.choice(special_chars)
+    ]
+    
+    # Fill the rest of the password
+    remaining_length = length - len(password)
+    all_chars = lowercase + uppercase + digits + special_chars
+    password.extend(random.choice(all_chars) for _ in range(remaining_length))
+    
+    # Shuffle the password characters
+    random.shuffle(password)
+    
+    return ''.join(password)
+
+
+def get_yc_configuration() -> Dict[str, str]:
+    """
+    Get Yandex Cloud configuration from environment.
+    Authentication is done via service account JSON credentials.
+    
+    Returns:
+        Dictionary with Yandex Cloud configuration
         
     Raises:
-        YandexCloudDBError: If cluster creation fails
+        YandexCloudDBError: If required configuration is missing
+    """
+    config = Config.get_all()
+    
+    # Check if service account JSON credentials are provided
+    if not config.get("YC_SA_JSON_CREDENTIALS"):
+        raise YandexCloudDBError("Missing required Yandex Cloud authentication. "
+                               "Please provide YC_SA_JSON_CREDENTIALS (JSON text)")
+    
+    # Check for other required configuration
+    required_keys = [
+        "YC_CLOUD_ID",
+        "YC_FOLDER_ID",
+        "YC_POSTGRES_CLUSTER_ID"
+    ]
+    
+    missing_keys = [key for key in required_keys if not config.get(key)]
+    
+    if missing_keys:
+        raise YandexCloudDBError(f"Missing required Yandex Cloud configuration: {', '.join(missing_keys)}")
+    
+    result = {key: config.get(key) for key in required_keys}
+    
+    # Add authentication
+    result["YC_SA_JSON_CREDENTIALS"] = config.get("YC_SA_JSON_CREDENTIALS")
+    
+    return result
+
+
+def create_database_and_user(db_name: str) -> Tuple[str, str, str]:
+    """
+    Create a database and user in Yandex Cloud PostgreSQL cluster using yc CLI.
+    This operation is idempotent - if database or user already exist, 
+    they will not be modified (but password will be updated).
+    
+    Args:
+        db_name: Name of the database and user to create
+        
+    Returns:
+        Tuple containing (host, database_url, password)
+        
+    Raises:
+        YandexCloudDBError: If database or user creation fails
+    """
+    logger.debug(f"Creating database and user {db_name} in Yandex Cloud PostgreSQL")
+    
+    # Get Yandex Cloud configuration
+    yc_config = get_yc_configuration()
+    
+    # Get cluster host and info
+    host, cluster_id = _get_cluster_host_and_id(yc_config)
+    
+    # Generate a secure password for the user
+    password = generate_secure_password()
+    
+    # Setup environment for yc commands
+    env = os.environ.copy()
+    temp_file = None
+    
+    try:
+        # Create temporary file to store the JSON credentials
+        temp_file = tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False)
+        temp_file.write(yc_config["YC_SA_JSON_CREDENTIALS"])
+        temp_file.flush()
+        temp_file.close()
+        
+        # Register cleanup to ensure the temporary file is removed
+        atexit.register(lambda: os.unlink(temp_file.name) if os.path.exists(temp_file.name) else None)
+        
+        # Set environment variables for yc command
+        env["YC_SERVICE_ACCOUNT_KEY_FILE"] = temp_file.name
+        env["YC_CLOUD_ID"] = yc_config["YC_CLOUD_ID"]
+        env["YC_FOLDER_ID"] = yc_config["YC_FOLDER_ID"]
+        
+        # Check if user exists
+        logger.debug(f"Checking if user {db_name} exists")
+        list_users_cmd = [
+            "yc", "managed-postgresql", "user", "list",
+            "--cluster-id", cluster_id,
+            "--format", "json"
+        ]
+        
+        users_output = subprocess.check_output(list_users_cmd, env=env, stderr=subprocess.PIPE)
+        users = json.loads(users_output)
+        
+        user_exists = any(user["name"] == db_name for user in users)
+        
+        # Create or update user
+        if user_exists:
+            logger.info(f"User {db_name} already exists, updating password")
+            update_user_cmd = [
+                "yc", "managed-postgresql", "user", "update",
+                db_name,
+                "--cluster-id", cluster_id,
+                "--password", password
+            ]
+            subprocess.check_call(update_user_cmd, env=env, stderr=subprocess.PIPE)
+        else:
+            logger.info(f"Creating new user {db_name}")
+            create_user_cmd = [
+                "yc", "managed-postgresql", "user", "create",
+                db_name,
+                "--cluster-id", cluster_id,
+                "--password", password
+            ]
+            subprocess.check_call(create_user_cmd, env=env, stderr=subprocess.PIPE)
+        
+        # Check if database exists
+        logger.debug(f"Checking if database {db_name} exists")
+        list_dbs_cmd = [
+            "yc", "managed-postgresql", "database", "list",
+            "--cluster-id", cluster_id,
+            "--format", "json"
+        ]
+        
+        dbs_output = subprocess.check_output(list_dbs_cmd, env=env, stderr=subprocess.PIPE)
+        databases = json.loads(dbs_output)
+        
+        db_exists = any(db["name"] == db_name for db in databases)
+        
+        # Create database if it doesn't exist
+        if not db_exists:
+            logger.info(f"Creating new database {db_name}")
+            create_db_cmd = [
+                "yc", "managed-postgresql", "database", "create",
+                db_name,
+                "--cluster-id", cluster_id,
+                "--owner", db_name
+            ]
+            subprocess.check_call(create_db_cmd, env=env, stderr=subprocess.PIPE)
+        else:
+            logger.info(f"Database {db_name} already exists")
+        
+        # Generate DATABASE_URL for applications
+        database_url = f"postgresql://{db_name}:{password}@{host}:6432/{db_name}"
+        
+        logger.info(f"Successfully ensured database and user {db_name} in Yandex Cloud PostgreSQL")
+        return host, database_url, password
+        
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Failed during database and user operations: {str(e)}"
+        if hasattr(e, 'stderr') and e.stderr:
+            error_msg += f"\nError output: {e.stderr.decode('utf-8', errors='replace')}"
+        logger.error(error_msg)
+        raise YandexCloudDBError(error_msg)
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        raise YandexCloudDBError(f"Unexpected error: {str(e)}")
+    finally:
+        # Ensure the temporary file is removed
+        if temp_file and os.path.exists(temp_file.name):
+            try:
+                os.unlink(temp_file.name)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary file {temp_file.name}: {str(e)}")
+
+
+def create_database(db_name: str, db_type: str = "postgres") -> Dict[str, Any]:
+    """
+    Create a database in Yandex Cloud.
+    
+    Args:
+        db_name: Name of the database to create
+        db_type: Type of database to create (only "postgres" is supported currently)
+        
+    Returns:
+        Dictionary with database connection information
+        
+    Raises:
+        YandexCloudDBError: If database creation fails or type is not supported
     """
     if db_type.lower() != "postgres":
-        raise YandexCloudDBError(f"Unsupported database type: {db_type}, only 'postgres' is currently supported")
+        raise YandexCloudDBError(f"Unsupported database type: {db_type}. Only 'postgres' is supported.")
     
-    sdk = get_yc_sdk()
-    cloud_config = Config.get_yandex_cloud_credentials()
-    db_credentials = Config.get_db_credentials()
-    folder_id = cloud_config["folder_id"]
+    host, database_url, password = create_database_and_user(db_name)
     
-    # Get the cluster service
-    cluster_service = sdk.client(ClusterServiceStub)
-    
-    try:
-        logger.info(f"Creating PostgreSQL cluster: {name}")
-        
-        # Check if cluster already exists
-        existing_clusters = list_databases()
-        for cluster in existing_clusters:
-            if cluster.name == name:
-                logger.info(f"Cluster {name} already exists with ID {cluster.id}")
-                return cluster
-        
-        # Create cluster request
-        request = CreateClusterRequest(
-            folder_id=folder_id,
-            name=name,
-            description=f"PostgreSQL cluster for {name}",
-            environment=environment,
-            config_spec={
-                "version": version,
-                "postgresql_config": {
-                    # PostgreSQL specific configurations can be added here
-                    "max_connections": 100,
-                },
-                "resources": {
-                    "resource_preset_id": tier_type,
-                    "disk_size": disk_size * 2**30,  # Convert to bytes
-                    "disk_type_id": disk_type,
-                },
-                "access": {
-                    "data_lens": False,
-                    "web_sql": True,
-                },
-            },
-            database_specs=[
-                {
-                    "name": name,
-                    "owner": "admin",  # Will be created in user_specs
-                }
-            ],
-            user_specs=[
-                {
-                    "name": "admin",
-                    "password": db_credentials["password"],
-                    "permissions": [
-                        {
-                            "database_name": name,
-                        }
-                    ],
-                    "conn_limit": 50,
-                }
-            ],
-            host_specs=[
-                {
-                    "zone_id": "ru-central1-a",
-                    "subnet_id": "",  # Would need to be specified in real implementation
-                }
-            ],
-            network_id="",  # Would need to be specified in real implementation
-        )
-        
-        # Send the request
-        operation = cluster_service.Create(request)
-        
-        # Wait for the operation to complete if requested
-        if wait_for_ready:
-            logger.info(f"Waiting for cluster creation (up to {timeout} seconds)...")
-            
-            start_time = time.time()
-            while not operation.done:
-                if time.time() - start_time > timeout:
-                    raise YandexCloudDBError(f"Timeout waiting for cluster creation after {timeout} seconds")
-                
-                time.sleep(5)
-                operation = sdk.wait_operation_and_get_result(
-                    operation_id=operation.id,
-                    timeout=min(5, timeout - (time.time() - start_time))
-                )
-            
-            # Get the created cluster
-            cluster_id = operation.response.id
-            cluster = cluster_service.Get(id=cluster_id)
-            logger.info(f"PostgreSQL cluster created successfully with ID: {cluster_id}")
-            return cluster
-        else:
-            logger.info(f"PostgreSQL cluster creation initiated, operation ID: {operation.id}")
-            # Return a placeholder since we don't have the actual cluster yet
-            return Cluster(id=operation.id, name=name, status="CREATING")
-            
-    except Exception as e:
-        logger.error(f"Failed to create PostgreSQL cluster: {str(e)}")
-        raise YandexCloudDBError(f"Failed to create PostgreSQL cluster: {str(e)}")
+    return {
+        "name": db_name,
+        "type": db_type,
+        "host": host,
+        "port": 6432,
+        "username": db_name,
+        "password": password,
+        "database_url": database_url
+    }
 
 
-def delete_database(name: str) -> None:
+def delete_database(db_name: str, db_type: str = "postgres") -> bool:
     """
-    Delete a PostgreSQL database cluster in Yandex Cloud.
+    Delete a database in Yandex Cloud using yc CLI.
     
     Args:
-        name: Cluster name
+        db_name: Name of the database to delete
+        db_type: Type of database to delete (only "postgres" is supported currently)
         
-    Raises:
-        YandexCloudDBError: If cluster deletion fails
-    """
-    sdk = get_yc_sdk()
-    cluster_service = sdk.client(ClusterServiceStub)
-    
-    try:
-        logger.info(f"Deleting PostgreSQL cluster: {name}")
-        
-        # Find the cluster by name
-        existing_clusters = list_databases()
-        target_cluster = None
-        
-        for cluster in existing_clusters:
-            if cluster.name == name:
-                target_cluster = cluster
-                break
-                
-        if not target_cluster:
-            logger.warning(f"Cluster {name} does not exist, nothing to delete")
-            return
-            
-        # Delete the cluster
-        request = DeleteClusterRequest(cluster_id=target_cluster.id)
-        operation = cluster_service.Delete(request)
-        
-        logger.info(f"PostgreSQL cluster deletion initiated, operation ID: {operation.id}")
-            
-    except Exception as e:
-        logger.error(f"Failed to delete PostgreSQL cluster: {str(e)}")
-        raise YandexCloudDBError(f"Failed to delete PostgreSQL cluster: {str(e)}")
-
-
-def list_databases() -> List[Cluster]:
-    """
-    List PostgreSQL database clusters in Yandex Cloud.
-    
     Returns:
-        List[Cluster]: List of database clusters
+        True if database was deleted successfully, False otherwise
         
     Raises:
-        YandexCloudDBError: If listing clusters fails
+        YandexCloudDBError: If database deletion fails or type is not supported
     """
-    sdk = get_yc_sdk()
-    cloud_config = Config.get_yandex_cloud_credentials()
-    folder_id = cloud_config["folder_id"]
-    cluster_service = sdk.client(ClusterServiceStub)
+    if db_type.lower() != "postgres":
+        raise YandexCloudDBError(f"Unsupported database type: {db_type}. Only 'postgres' is supported.")
+    
+    logger.debug(f"Deleting database {db_name} in Yandex Cloud PostgreSQL")
+    
+    # Get Yandex Cloud configuration
+    yc_config = get_yc_configuration()
+    
+    # Get cluster ID
+    _, cluster_id = _get_cluster_host_and_id(yc_config)
+    
+    # Setup environment for yc commands
+    env = os.environ.copy()
+    temp_file = None
     
     try:
-        logger.info("Listing PostgreSQL clusters")
+        # Create temporary file to store the JSON credentials
+        temp_file = tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False)
+        temp_file.write(yc_config["YC_SA_JSON_CREDENTIALS"])
+        temp_file.flush()
+        temp_file.close()
         
-        request = ListClustersRequest(folder_id=folder_id)
-        response = cluster_service.List(request)
+        # Register cleanup to ensure the temporary file is removed
+        atexit.register(lambda: os.unlink(temp_file.name) if os.path.exists(temp_file.name) else None)
         
-        return list(response.clusters)
-            
+        # Set environment variables for yc command
+        env["YC_SERVICE_ACCOUNT_KEY_FILE"] = temp_file.name
+        env["YC_CLOUD_ID"] = yc_config["YC_CLOUD_ID"]
+        env["YC_FOLDER_ID"] = yc_config["YC_FOLDER_ID"]
+        
+        # Check if database exists
+        logger.debug(f"Checking if database {db_name} exists")
+        list_dbs_cmd = [
+            "yc", "managed-postgresql", "database", "list",
+            "--cluster-id", cluster_id,
+            "--format", "json"
+        ]
+        
+        dbs_output = subprocess.check_output(list_dbs_cmd, env=env, stderr=subprocess.PIPE)
+        databases = json.loads(dbs_output)
+        
+        db_exists = any(db["name"] == db_name for db in databases)
+        
+        if not db_exists:
+            logger.info(f"Database {db_name} does not exist, nothing to delete")
+            return True
+        
+        # Delete database
+        logger.info(f"Deleting database {db_name}")
+        delete_db_cmd = [
+            "yc", "managed-postgresql", "database", "delete",
+            db_name,
+            "--cluster-id", cluster_id
+        ]
+        subprocess.check_call(delete_db_cmd, env=env, stderr=subprocess.PIPE)
+        
+        # Check if user exists
+        logger.debug(f"Checking if user {db_name} exists")
+        list_users_cmd = [
+            "yc", "managed-postgresql", "user", "list",
+            "--cluster-id", cluster_id,
+            "--format", "json"
+        ]
+        
+        users_output = subprocess.check_output(list_users_cmd, env=env, stderr=subprocess.PIPE)
+        users = json.loads(users_output)
+        
+        user_exists = any(user["name"] == db_name for user in users)
+        
+        if user_exists:
+            # Delete user
+            logger.info(f"Deleting user {db_name}")
+            delete_user_cmd = [
+                "yc", "managed-postgresql", "user", "delete",
+                db_name,
+                "--cluster-id", cluster_id
+            ]
+            subprocess.check_call(delete_user_cmd, env=env, stderr=subprocess.PIPE)
+        
+        logger.info(f"Successfully deleted database and user {db_name}")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Failed during database deletion: {str(e)}"
+        if hasattr(e, 'stderr') and e.stderr:
+            error_msg += f"\nError output: {e.stderr.decode('utf-8', errors='replace')}"
+        logger.error(error_msg)
+        return False
     except Exception as e:
-        logger.error(f"Failed to list PostgreSQL clusters: {str(e)}")
-        raise YandexCloudDBError(f"Failed to list PostgreSQL clusters: {str(e)}") 
+        logger.error(f"Unexpected error during database deletion: {str(e)}")
+        return False
+    finally:
+        # Ensure the temporary file is removed
+        if temp_file and os.path.exists(temp_file.name):
+            try:
+                os.unlink(temp_file.name)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary file {temp_file.name}: {str(e)}")
+
+
+def _get_cluster_host_and_id(yc_config: Dict[str, str]) -> Tuple[str, str]:
+    """
+    Get the host name and ID for the PostgreSQL cluster.
+    
+    Args:
+        yc_config: Yandex Cloud configuration
+        
+    Returns:
+        Tuple containing (host, cluster_id)
+        
+    Raises:
+        YandexCloudDBError: If getting cluster info fails
+    """
+    try:
+        logger.debug("Getting PostgreSQL cluster information")
+        cluster_id = yc_config["YC_POSTGRES_CLUSTER_ID"]
+        
+        env = os.environ.copy()
+        temp_file = None
+        
+        try:
+            # Create temporary file to store the JSON credentials
+            temp_file = tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False)
+            temp_file.write(yc_config["YC_SA_JSON_CREDENTIALS"])
+            temp_file.flush()
+            temp_file.close()
+            
+            # Register cleanup to ensure the temporary file is removed
+            atexit.register(lambda: os.unlink(temp_file.name) if os.path.exists(temp_file.name) else None)
+            
+            # Set the path to our temporary JSON file
+            logger.debug(f"Using service account JSON credentials from temporary file: {temp_file.name}")
+            env["YC_SERVICE_ACCOUNT_KEY_FILE"] = temp_file.name
+            
+            env["YC_CLOUD_ID"] = yc_config["YC_CLOUD_ID"]
+            env["YC_FOLDER_ID"] = yc_config["YC_FOLDER_ID"]
+            
+            # Get hosts list to retrieve the master host name
+            hosts_cmd = [
+                "yc", "managed-postgresql", "hosts", "list",
+                "--cluster-id", cluster_id,
+                "--format", "json"
+            ]
+            
+            logger.debug(f"Executing command: {' '.join(hosts_cmd)}")
+            hosts_output = subprocess.check_output(hosts_cmd, env=env, stderr=subprocess.PIPE)
+            
+            hosts_data = json.loads(hosts_output)
+            
+            # Extract host name from the hosts list
+            # Usually the master host is the one with role = "MASTER" or the first host in a single-node cluster
+            host = None
+            
+            for host_info in hosts_data:
+                if "role" in host_info and host_info["role"] == "MASTER":
+                    host = host_info["name"]
+                    break
+            
+            # If no master found or no role field, take the first host
+            if not host and hosts_data:
+                host = hosts_data[0]["name"]
+            
+            if not host:
+                # Fallback to cluster ID format if no hosts found
+                host = f"{cluster_id}.postgresql.yandex.internal"
+                logger.warning(f"Could not extract host from hosts list, using fallback: {host}")
+            else:
+                logger.info(f"Found PostgreSQL cluster host: {host}")
+                
+            return host, cluster_id
+            
+        finally:
+            # Ensure the temporary file is removed
+            if temp_file and os.path.exists(temp_file.name):
+                try:
+                    os.unlink(temp_file.name)
+                except Exception as e:
+                    logger.warning(f"Failed to remove temporary file {temp_file.name}: {str(e)}")
+                
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to get PostgreSQL cluster info: {str(e)}")
+        # Log more details when command fails
+        if hasattr(e, 'output') and e.output:
+            logger.error(f"Command output: {e.output.decode('utf-8', errors='replace')}")
+        if hasattr(e, 'stderr') and e.stderr:
+            logger.error(f"Error output: {e.stderr.decode('utf-8', errors='replace')}")
+        raise YandexCloudDBError(f"Failed to get PostgreSQL cluster info: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error getting cluster info: {str(e)}")
+        raise YandexCloudDBError(f"Unexpected error: {str(e)}") 
