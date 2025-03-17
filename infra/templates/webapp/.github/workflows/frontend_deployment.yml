@@ -1,0 +1,143 @@
+name: Deploy Frontend to Yandex Cloud Storage
+
+on:
+  # Запуск после успешного деплоя бэкенда
+  workflow_run:
+    workflows: ["Deploy Backend to Yandex Serverless Containers"]
+    types:
+      - completed
+    branches:
+      - main
+  # Запуск при изменениях фронтенд-файлов
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend_deployment.yml'
+  # Возможность ручного запуска
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Причина ручного запуска деплоя'
+        required: false
+        default: 'Ручной деплой фронтенда'
+
+jobs:
+  deploy:
+    # Проверка условий запуска - для workflow_run проверяем успешность бэкенда
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Выводим информацию о запуске
+      - name: Get Deployment Info
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "Запущен после успешного деплоя бэкенда"
+            echo "Backend Workflow Run ID: ${{ github.event.workflow_run.id }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Ручной запуск деплоя фронтенда"
+            echo "Причина: ${{ github.event.inputs.reason }}"
+          else
+            echo "Автоматический деплой из-за изменений фронтенд-файлов"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: './frontend/package-lock.json'
+
+      # Проверка доступности API Gateway
+      - name: Check API Gateway
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          # Настройка Yandex Cloud CLI для проверки API Gateway
+          echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > sa-key.json
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i /tmp/yc
+          /tmp/yc/bin/yc config profile create sa-profile
+          /tmp/yc/bin/yc config set service-account-key sa-key.json
+          /tmp/yc/bin/yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
+          
+          # Проверка статуса API Gateway
+          API_GW_URL=$(/tmp/yc/bin/yc serverless api-gateway get ${{ secrets.YC_API_GATEWAY_NAME }} --format json | jq -r '.domain')
+          echo "API Gateway URL: https://$API_GW_URL"
+          
+          # Проверка доступности бэкенда
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$API_GW_URL/health/")
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✅ API Gateway доступен и бэкенд работает (HTTP $HTTP_STATUS)"
+          else
+            echo "⚠️ API Gateway вернул код $HTTP_STATUS - возможно есть проблемы на бэкенде"
+            echo "Продолжаем деплой фронтенда"
+          fi
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      # Создаем .env файл с API URL для сборки
+      - name: Setup Environment Variables
+        run: |
+          # Получаем URL API Gateway (для push и workflow_dispatch)
+          if [ "${{ github.event_name }}" != "workflow_run" ]; then
+            # Используем YC CLI только если он еще не настроен
+            if [ ! -f "sa-key.json" ]; then
+              echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > sa-key.json
+              curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i /tmp/yc
+              /tmp/yc/bin/yc config profile create sa-profile
+              /tmp/yc/bin/yc config set service-account-key sa-key.json
+              /tmp/yc/bin/yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
+              
+              API_GW_URL=$(/tmp/yc/bin/yc serverless api-gateway get ${{ secrets.YC_API_GATEWAY_NAME }} --format json | jq -r '.domain')
+            else
+              API_GW_URL=$(/tmp/yc/bin/yc serverless api-gateway get ${{ secrets.YC_API_GATEWAY_NAME }} --format json | jq -r '.domain')
+            fi
+          else
+            # При запуске после backend workflow не нужно повторно запрашивать YC
+            # Можно использовать значение из секретов
+            API_GW_URL="${{ secrets.YC_API_GATEWAY_DOMAIN }}"
+          fi
+          
+          # Создаем .env.production файл для Next.js сборки
+          cat > ./frontend/.env.production << EOF
+          NEXT_PUBLIC_API_URL=https://$API_GW_URL
+          # Другие переменные окружения для production
+          EOF
+          
+          echo "Созданы переменные окружения для сборки фронтенда"
+          echo "NEXT_PUBLIC_API_URL установлен на https://$API_GW_URL"
+
+      - name: Build Next.js app
+        working-directory: ./frontend
+        run: NODE_ENV=production npm run build -- --no-lint
+        # Мы заменили getServerSideProps на клиентский редирект
+        # Теперь статический экспорт будет работать правильно
+        
+      # Проверим содержимое папки out и её структуру
+      - name: Debug - Check generated files
+        run: |
+          echo "Checking out directory structure:"
+          find frontend/out -type d | sort
+          echo "Количество файлов в каждой директории:"
+          find frontend/out -type d -exec sh -c 'echo "{} содержит $(find "{}" -type f | wc -l) файлов"' \;
+        
+      # Теперь можем использовать Object Storage для хостинга
+      - name: Upload to Yandex Cloud Object Storage
+        uses: yc-actions/yc-obj-storage-upload@v2
+        with:
+          yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+          bucket: ${{ secrets.YC_BUCKET_NAME }}
+          root: ./frontend/out
+          clear: true
+          include: "**/*"  # Рекурсивно включаем все файлы и поддиректории
+          # Настраиваем кэширование для различных типов файлов
+          cache-control: |
+            *.js, *.css: public, max-age=31536000, immutable
+            *.png, *.jpg, *.jpeg, *.gif, *.svg, *.ico: public, max-age=31536000
+            *.html: max-age=3600
+            *: no-cache

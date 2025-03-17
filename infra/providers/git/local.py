@@ -6,7 +6,8 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Set
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -82,24 +83,75 @@ def create_project_directory(project_dir: Path) -> None:
 
 def populate_project_directory(
     project_dir: Path, 
-    technologies: list[str]
+    technologies: list[str],
+    template_name: Optional[str] = None
 ) -> None:
     """
-    Populate an empty project directory with boilerplate code.
+    Populate an empty project directory with boilerplate code based on selected technologies.
     
-    This is currently a stub function that will be expanded later.
+    This function copies template files from infra/templates directory based on the
+    specified template_name.
     
     Args:
         project_dir: Path object for the project directory
         technologies: List of technologies to include
+        template_name: Name of template to use (required)
         
     Raises:
-        LocalGitError: If there's an error populating the directory
+        LocalGitError: If there's an error populating the directory or if template is not found
     """
     try:
-        # This is a placeholder. In the future, this will generate appropriate
-        # boilerplate based on the selected technologies
-        readme_content = f"""# Project
+        from infra.templates.generator import generate_boilerplate, list_available_templates, TemplateError
+        
+        # Get the project name from the directory path
+        project_name = project_dir.name
+        
+        # Get available templates
+        available_templates = list_available_templates()
+        
+        # Шаблон должен быть явно указан
+        if not template_name:
+            raise LocalGitError("Template name must be specified")
+            
+        # Проверяем наличие шаблона
+        if template_name not in available_templates:
+            raise LocalGitError(f"Specified template '{template_name}' not found in available templates")
+            
+        template_to_use = template_name
+        
+        # Use the template system to generate boilerplate
+        # We're using an existing directory so we need to adjust parameters
+        output_dir = project_dir.parent
+        
+        # Since we're handling git repository separately, don't initialize git here
+        try:
+            generate_boilerplate(
+                project_name=project_name,
+                template_name=template_to_use,
+                output_dir=output_dir,
+                initialize_git=False,
+                force_existing_dir=True
+            )
+            
+            logger.info(f"Populated project directory with template: {template_to_use}")
+        except TemplateError as e:
+            logger.error(f"Error using template system: {str(e)}")
+            raise LocalGitError(f"Error using template system: {str(e)}")
+            
+    except Exception as e:
+        logger.error(f"Error populating project directory: {str(e)}")
+        raise LocalGitError(f"Error populating project directory: {str(e)}")
+
+
+def _create_basic_readme(project_dir: Path, technologies: list[str]) -> None:
+    """
+    Create a basic README file when no template is found.
+    
+    Args:
+        project_dir: Path object for the project directory
+        technologies: List of technologies to include
+    """
+    readme_content = f"""# Project
 
 This project uses the following technologies:
 {', '.join(technologies)}
@@ -108,21 +160,31 @@ This project uses the following technologies:
 
 TODO: Add instructions for setting up the project locally.
 """
-        with open(project_dir / "README.md", "w") as f:
-            f.write(readme_content)
-            
-        logger.info(f"Populated project directory with boilerplate code")
+    with open(project_dir / "README.md", "w") as f:
+        f.write(readme_content)
         
-    except Exception as e:
-        logger.error(f"Error populating project directory: {str(e)}")
-        raise LocalGitError(f"Error populating project directory: {str(e)}")
+    logger.info("Created basic README.md file")
+
+
+def is_git_initialized(project_dir: Path) -> bool:
+    """
+    Check if a Git repository is already initialized in the project directory.
+    
+    Args:
+        project_dir: Path object for the project directory
+        
+    Returns:
+        bool: True if Git is already initialized (.git directory exists)
+    """
+    git_dir = project_dir / ".git"
+    return git_dir.exists()
 
 
 def initialize_git_repository(
     project_dir: Path, 
     remote_url: str,
     branch: str = "main"
-) -> None:
+) -> bool:
     """
     Initialize a Git repository in the project directory, set up remote, and make initial commit.
     
@@ -130,6 +192,9 @@ def initialize_git_repository(
         project_dir: Path object for the project directory
         remote_url: URL of the remote repository
         branch: Name of the default branch
+        
+    Returns:
+        bool: True if Git was newly initialized, False if Git was already initialized
         
     Raises:
         LocalGitError: If there's an error initializing the repository
@@ -139,100 +204,110 @@ def initialize_git_repository(
         cwd = os.getcwd()
         os.chdir(project_dir)
         
-        # Add token to remote URL for authentication
+        # Get GitHub credentials
         from infra.config import Config
         credentials = Config.get_github_credentials()
         token = credentials.get("token")
+        username = credentials.get("username")
         
-        # Replace https://github.com with https://token@github.com
-        authenticated_url = remote_url
-        if token and "https://" in remote_url:
-            authenticated_url = remote_url.replace("https://", f"https://{token}@")
+        if not token:
+            logger.error("GitHub token not found in configuration")
+            raise LocalGitError("GitHub token is required for Git operations")
+        
+        # Prepare environment with GitHub credentials
+        git_env = os.environ.copy()
+        # Setting GIT_ASKPASS to 'echo' with token to avoid password prompts
+        git_env["GIT_ASKPASS"] = "echo"
+        git_env["GIT_TERMINAL_PROMPT"] = "0"
+        # Set username and password in environment for Git to use
+        git_env["GIT_USERNAME"] = username
+        git_env["GIT_PASSWORD"] = token
         
         # Check if .git directory already exists
         git_dir = project_dir / ".git"
-        if not git_dir.exists():
-            # Initialize repository
-            subprocess.run(["git", "init", "-b", branch], check=True)
-            logger.info(f"Initialized Git repository in {project_dir}")
-        else:
-            logger.info(f"Git repository already exists in {project_dir}")
-            
-        # Set up remote
-        remote_exists = False
-        result = subprocess.run(
-            ["git", "remote"], 
-            capture_output=True, 
-            text=True, 
-            check=True
-        )
+        already_initialized = git_dir.exists()
         
-        if "origin" in result.stdout.split():
-            # Check if remote URL matches
-            result = subprocess.run(
-                ["git", "remote", "get-url", "origin"], 
-                capture_output=True, 
-                text=True, 
-                check=True
-            )
-            if result.stdout.strip() != remote_url:
-                # Update remote URL
-                subprocess.run(
-                    ["git", "remote", "set-url", "origin", authenticated_url], 
-                    check=True
-                )
-                logger.info(f"Updated remote URL to {remote_url}")
-            else:
-                remote_exists = True
-                # We still need to update the URL with credentials for push
-                subprocess.run(
-                    ["git", "remote", "set-url", "origin", authenticated_url], 
-                    check=True
-                )
-                logger.info(f"Remote 'origin' already points to {remote_url}")
-        else:
-            # Add remote
+        if not already_initialized:
+            # Initialize repository
+            subprocess.run(["git", "init", "-b", branch], check=True, env=git_env)
+            logger.info(f"Initialized Git repository in {project_dir}")
+            
+            # Configure Git credential helper to use environment variables
+            subprocess.run(["git", "config", "credential.helper", ""], check=True, env=git_env)
+            subprocess.run(["git", "config", "credential.helper", "env"], check=True, env=git_env)
+            
+            # Set up remote
             subprocess.run(
-                ["git", "remote", "add", "origin", authenticated_url], 
-                check=True
+                ["git", "remote", "add", "origin", remote_url], 
+                check=True,
+                env=git_env
             )
             logger.info(f"Added remote 'origin' pointing to {remote_url}")
             
-        # Add all files
-        subprocess.run(["git", "add", "-A"], check=True)
-        
-        # Check if there are changes to commit
-        result = subprocess.run(
-            ["git", "status", "--porcelain"], 
-            capture_output=True, 
-            text=True,
-            check=True
-        )
-        
-        if result.stdout.strip():
-            # Make initial commit
-            subprocess.run(
-                ["git", "commit", "-m", "Initial commit"], 
-                check=True
-            )
-            logger.info("Created initial commit")
+            # Add all files
+            subprocess.run(["git", "add", "-A"], check=True, env=git_env)
             
-            # Push to remote
-            subprocess.run(
-                ["git", "push", "-u", "origin", branch], 
-                check=True
+            # Check if there are changes to commit
+            result = subprocess.run(
+                ["git", "status", "--porcelain"], 
+                capture_output=True, 
+                text=True,
+                check=True,
+                env=git_env
             )
-            logger.info(f"Pushed to remote repository")
-        else:
-            logger.info("No changes to commit")
             
-            if not remote_exists:
-                # If remote doesn't exist yet, push
+            if result.stdout.strip():
+                # Make initial commit
+                subprocess.run(
+                    ["git", "commit", "-m", "Initial commit"], 
+                    check=True,
+                    env=git_env
+                )
+                logger.info("Created initial commit")
+                
+                # Push to remote
                 subprocess.run(
                     ["git", "push", "-u", "origin", branch], 
-                    check=True
+                    check=True,
+                    env=git_env
                 )
                 logger.info(f"Pushed to remote repository")
+            else:
+                logger.info("No changes to commit")
+        else:
+            logger.info(f"Git repository already exists in {project_dir}")
+            
+            # Configure Git credential helper to use environment variables
+            subprocess.run(["git", "config", "credential.helper", ""], check=True, env=git_env)
+            subprocess.run(["git", "config", "credential.helper", "env"], check=True, env=git_env)
+            
+            # Check if remote exists
+            result = subprocess.run(
+                ["git", "remote"], 
+                capture_output=True, 
+                text=True, 
+                check=True,
+                env=git_env
+            )
+            
+            if "origin" in result.stdout.split():
+                # Update remote URL
+                subprocess.run(
+                    ["git", "remote", "set-url", "origin", remote_url], 
+                    check=True,
+                    env=git_env
+                )
+                logger.info(f"Updated remote URL")
+            else:
+                # Add remote if it doesn't exist
+                subprocess.run(
+                    ["git", "remote", "add", "origin", remote_url], 
+                    check=True,
+                    env=git_env
+                )
+                logger.info(f"Added remote 'origin' pointing to {remote_url}")
+            
+        return not already_initialized
             
     except subprocess.CalledProcessError as e:
         logger.error(f"Git command failed: {e.cmd}. Output: {e.stdout} {e.stderr}")
@@ -243,3 +318,36 @@ def initialize_git_repository(
     finally:
         # Change back to original directory
         os.chdir(cwd) 
+
+
+def find_github_secrets_in_workflow(project_dir: Path) -> Set[str]:
+    """
+    Scan the .github directory for workflow files and extract GitHub secrets references.
+    
+    Args:
+        project_dir: Path to the project directory
+        
+    Returns:
+        Set of secret names found in the workflow files
+    """
+    github_dir = project_dir / ".github"
+    secrets = set()
+    
+    if not github_dir.exists():
+        return secrets
+        
+    # Regex pattern to find secrets.XXX references in workflow files
+    secret_pattern = re.compile(r'\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}')
+    
+    # Look for workflow files in GitHub Actions directory
+    workflows_dir = github_dir / "workflows"
+    if workflows_dir.exists():
+        for workflow_file in workflows_dir.glob("*.yml"):
+            with open(workflow_file, "r") as f:
+                content = f.read()
+                # Find all secret references
+                for match in secret_pattern.finditer(content):
+                    secret_name = match.group(1)
+                    secrets.add(secret_name)
+    
+    return secrets 

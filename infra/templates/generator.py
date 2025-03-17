@@ -29,15 +29,25 @@ def list_available_templates() -> List[str]:
     Returns:
         List[str]: List of template names
     """
-    # Built-in templates
-    templates = ["django", "react", "django-react"]
+    # Get templates from physical directories
+    base_dir = Path(__file__).parent
+    logger.debug(f"Templates base directory: {base_dir}")
+    
+    # Find all directories that don't start with underscore
+    physical_templates = [d.name for d in base_dir.iterdir() 
+                         if d.is_dir() and not d.name.startswith('__')]
+    logger.debug(f"Template directories found: {physical_templates}")
+    
+    # Use only physically present templates
+    templates = physical_templates
     
     # Custom templates defined in config
     urls = Config.get_template_urls()
     for template_name, url in urls.items():
         if url and template_name not in templates:
             templates.append(template_name)
-            
+    
+    logger.debug(f"Available templates: {templates}")        
     return templates
 
 
@@ -56,113 +66,19 @@ def _get_template_path(template_name: str) -> Path:
     """
     # Base directory for templates
     base_dir = Path(__file__).parent
+    logger.debug(f"Looking for template '{template_name}' in base directory: {base_dir}")
     
     # Check if template directory exists
     template_dir = base_dir / template_name
+    logger.debug(f"Template directory path: {template_dir}, exists: {template_dir.exists()}")
+    
     if template_dir.exists():
+        logger.debug(f"Template found at: {template_dir}")
         return template_dir
         
     # If not, raise an error
+    logger.error(f"Template '{template_name}' not found at: {template_dir}")
     raise TemplateError(f"Template '{template_name}' not found")
-
-
-def _clone_template_from_repo(
-    template_name: str, 
-    target_dir: Path,
-) -> Path:
-    """
-    Clone a template from a Git repository.
-    
-    Args:
-        template_name: Name of the template
-        target_dir: Directory to clone the template to
-        
-    Returns:
-        Path: Path to the cloned repository
-        
-    Raises:
-        TemplateError: If cloning fails
-    """
-    urls = Config.get_template_urls()
-    url = urls.get(template_name)
-    
-    if not url:
-        raise TemplateError(f"No repository URL configured for template '{template_name}'")
-    
-    try:
-        logger.info(f"Cloning template from {url}")
-        Repo.clone_from(url, target_dir)
-        return target_dir
-    except Exception as e:
-        logger.error(f"Failed to clone template repository: {str(e)}")
-        raise TemplateError(f"Failed to clone template repository: {str(e)}")
-
-
-def _render_templates(
-    source_dir: Path,
-    target_dir: Path,
-    context: Dict[str, str],
-    file_extensions: List[str] = [".py", ".html", ".js", ".jsx", ".ts", ".tsx", ".md", ".yml", ".yaml", ".json"],
-) -> None:
-    """
-    Recursively render template files with context variables.
-    
-    Args:
-        source_dir: Source directory with templates
-        target_dir: Target directory to write rendered files
-        context: Context variables for templates
-        file_extensions: File extensions to process as templates
-        
-    Raises:
-        TemplateError: If rendering fails
-    """
-    try:
-        # Create Jinja2 environment
-        env = jinja2.Environment(
-            loader=jinja2.FileSystemLoader(source_dir),
-            keep_trailing_newline=True,
-        )
-        
-        # Ensure target directory exists
-        target_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Copy and render files
-        for item in source_dir.iterdir():
-            target_item = target_dir / item.name
-            
-            # Skip .git directory
-            if item.name == ".git":
-                continue
-                
-            # Process directories recursively
-            if item.is_dir():
-                _render_templates(item, target_item, context, file_extensions)
-            # Render template files
-            elif any(item.name.endswith(ext) for ext in file_extensions):
-                try:
-                    template_content = item.read_text()
-                    # Check if file contains Jinja2 placeholders
-                    if "{{" in template_content or "{%" in template_content:
-                        # Create template from content
-                        template = env.from_string(template_content)
-                        rendered_content = template.render(**context)
-                        
-                        # Write rendered content
-                        target_item.parent.mkdir(parents=True, exist_ok=True)
-                        target_item.write_text(rendered_content)
-                    else:
-                        # Just copy the file
-                        shutil.copy2(item, target_item)
-                except Exception as e:
-                    logger.warning(f"Failed to render template {item}: {str(e)}")
-                    # Copy the file as-is if rendering fails
-                    shutil.copy2(item, target_item)
-            # Copy other files
-            else:
-                shutil.copy2(item, target_item)
-    except Exception as e:
-        logger.error(f"Failed to render templates: {str(e)}")
-        raise TemplateError(f"Failed to render templates: {str(e)}")
 
 
 def _initialize_git_repo(project_dir: Path) -> None:
@@ -197,6 +113,7 @@ def generate_boilerplate(
     output_dir: Optional[Union[str, Path]] = None,
     context: Optional[Dict[str, str]] = None,
     initialize_git: bool = True,
+    force_existing_dir: bool = False,
 ) -> Path:
     """
     Generate a project boilerplate from a template.
@@ -207,6 +124,7 @@ def generate_boilerplate(
         output_dir: Directory to create the project in (defaults to current directory)
         context: Additional context variables for the template
         initialize_git: Whether to initialize a Git repository
+        force_existing_dir: If True, will use the existing directory even if it already exists
         
     Returns:
         Path: Path to the generated project
@@ -227,7 +145,7 @@ def generate_boilerplate(
     
     try:
         # Check if project directory already exists
-        if project_dir.exists():
+        if project_dir.exists() and not force_existing_dir:
             logger.warning(f"Project directory {project_dir} already exists")
             raise TemplateError(f"Project directory {project_dir} already exists")
             
@@ -241,17 +159,20 @@ def generate_boilerplate(
         if context:
             template_context.update(context)
             
-        # Try using local template first
-        try:
-            template_dir = _get_template_path(template_name)
-            # Copy template to project directory
-            shutil.copytree(template_dir, project_dir)
-        except TemplateError:
-            # If local template doesn't exist, try cloning from repository
-            _clone_template_from_repo(template_name, project_dir)
+        # Get local template path
+        logger.info(f"Using local template for {template_name}")
+        template_dir = _get_template_path(template_name)
         
-        # Render templates in project directory
-        _render_templates(project_dir, project_dir, template_context)
+        # Copy template to project directory
+        if force_existing_dir and project_dir.exists():
+            # Just copy all files directly
+            logger.debug(f"Using existing directory: {project_dir}")
+            # Use shutil.copytree with dirs_exist_ok=True to copy into existing directory
+            shutil.copytree(template_dir, project_dir, dirs_exist_ok=True)
+        else:
+            # Create a new directory with the template
+            logger.debug(f"Creating new directory: {project_dir}")
+            shutil.copytree(template_dir, project_dir)
         
         # Initialize Git repository if requested
         if initialize_git:
@@ -260,9 +181,18 @@ def generate_boilerplate(
         logger.info(f"Boilerplate generated successfully at {project_dir}")
         return project_dir
         
+    except TemplateError:
+        # Re-raise template errors without cleanup
+        raise
     except Exception as e:
         logger.error(f"Failed to generate boilerplate: {str(e)}")
         # Clean up if project directory was created
         if project_dir.exists():
+            logger.debug(f"Cleaning up project directory: {project_dir}")
             shutil.rmtree(project_dir)
-        raise TemplateError(f"Failed to generate boilerplate: {str(e)}") 
+            # Get original exception's stack trace but create new exception with updated message
+            if isinstance(e, FileExistsError) and str(e).find(str(project_dir)) >= 0:
+                # If this was a "directory exists" error but we've now removed it,
+                # raise a different error that better explains what happened
+                raise TemplateError(f"Error during project creation. The directory was removed for retry.") from e
+        raise TemplateError(f"Failed to generate boilerplate: {str(e)}") from e 
