@@ -29,6 +29,111 @@ class SetupError(Exception):
     pass
 
 
+def _setup_python_environment(project_dir: Path, log_func: Callable) -> None:
+    """
+    Set up a Python virtual environment for the project if Python files and requirements.txt are present.
+    Uses the latest Python version from pyenv.
+
+    Args:
+        project_dir: Path to the project directory
+        log_func: Function to use for logging
+    """
+    logger.debug(f"Checking if project has Python files and requirements.txt")
+
+    # Check if project has Python files
+    python_files = list(project_dir.glob("**/*.py"))
+    has_requirements = (project_dir / "requirements.txt").exists()
+
+    if not python_files or not has_requirements:
+        logger.debug(f"Project doesn't have Python files or requirements.txt, skipping venv setup")
+        return
+
+    log_func("🔄 Setting up Python virtual environment...")
+
+    try:
+        # Check if pyenv is installed
+        try:
+            subprocess.run(["pyenv", "--version"], check=True, capture_output=True)
+        except (subprocess.SubprocessError, FileNotFoundError):
+            log_func("⚠️  pyenv is not installed or not in PATH, skipping virtual environment setup")
+            return
+
+        # Get latest Python version from pyenv
+        result = subprocess.run(
+            ["pyenv", "versions", "--bare"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+
+        versions = [v.strip() for v in result.stdout.splitlines() if v.strip()]
+        if not versions:
+            log_func("⚠️  No Python versions found in pyenv, skipping virtual environment setup")
+            return
+
+        # Sort versions and get the latest one
+        # Filter only versions that match numeric format (x.y.z)
+        import re
+        numeric_versions = [v for v in versions if re.match(r'^\d+\.\d+\.\d+$', v)]
+        if not numeric_versions:
+            # If no numeric versions, use whatever is available
+            latest_version = versions[-1]
+        else:
+            # Sort numeric versions
+            latest_version = sorted(numeric_versions, key=lambda v: [int(x) for x in v.split('.')], reverse=True)[0]
+
+        logger.debug(f"Using Python version {latest_version} for virtual environment")
+        log_func(f"   Using Python version {latest_version}")
+
+        # Check if .venv directory already exists
+        venv_dir = project_dir / ".venv"
+        if venv_dir.exists():
+            logger.debug(f"Virtual environment already exists at {venv_dir}")
+            log_func(f"ℹ️ Virtual environment already exists, skipping creation")
+            return
+
+        # Use pyenv with specific Python version to create virtualenv
+        subprocess.run(
+            ["pyenv", "exec", "python", "-m", "venv", str(venv_dir)],
+            check=True,
+            cwd=project_dir,
+            env={**os.environ, "PYENV_VERSION": latest_version}
+        )
+
+        # Get path to pip in the virtual environment
+        if sys.platform == "win32":
+            pip_path = venv_dir / "Scripts" / "pip"
+        else:
+            pip_path = venv_dir / "bin" / "pip"
+
+        # Upgrade pip
+        subprocess.run(
+            [str(pip_path), "install", "--upgrade", "pip"],
+            check=True,
+            cwd=project_dir
+        )
+
+        # Install requirements
+        subprocess.run(
+            [str(pip_path), "install", "--no-cache-dir", "-r", "requirements.txt"],
+            check=True,
+            cwd=project_dir
+        )
+
+        log_func(f"✅ Python virtual environment created and requirements installed")
+        logger.debug(f"Successfully set up Python virtual environment in {venv_dir}")
+
+    except subprocess.CalledProcessError as e:
+        stderr_msg = e.stderr.decode() if hasattr(e.stderr, 'decode') else e.stderr
+        logger.error(f"Failed to set up Python environment: {stderr_msg if stderr_msg else str(e)}")
+        log_func(f"⚠️  Failed to set up Python environment: {str(e)}")
+        log_func(f"   Continuing with project setup...")
+    except Exception as e:
+        logger.error(f"Unexpected error setting up Python environment: {str(e)}")
+        log_func(f"⚠️  Unexpected error setting up Python environment: {str(e)}")
+        log_func(f"   Continuing with project setup...")
+
+
 def setup_project(
     name: str,
     technologies: List[str],
@@ -111,6 +216,10 @@ def setup_project(
             log,
             template_name
         )
+
+        # Step 3.5: Set up Python virtual environment if needed
+        logger.debug("Step 3.5: Setting up Python virtual environment if needed")
+        _setup_python_environment(project_dir, log)
 
         # Step 4: Create database (moved earlier in the process)
         logger.debug("Step 4: Creating database")
@@ -271,7 +380,7 @@ def _create_local_project_files(
     else:
         directory_state = "empty" if is_empty else "non-empty"
         logger.debug(f"Using existing {directory_state} directory: {project_dir}")
-        log_func(f"✅ Using existing {directory_state} directory: {project_dir}")
+        log_func(f"ℹ️ Using existing {directory_state} directory: {project_dir}")
 
     # Populate with template files if new directory or empty existing directory
     should_populate = not dir_exists or is_empty
