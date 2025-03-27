@@ -204,7 +204,7 @@ def _check_project_directory(name: str, log_func: Callable) -> Tuple[Path, bool,
 
     if dir_exists:
         logger.debug(f"Project directory exists: {project_dir}, empty: {is_empty}")
-        log_func(f"⚠️  Project directory already exists: {project_dir}")
+        log_func(f"ℹ️  Project directory already exists: {project_dir}")
         if is_empty:
             log_func(f"   Directory is empty.")
         else:
