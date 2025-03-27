@@ -9,7 +9,7 @@ This project provides a set of tools and scripts for automating the infrastructu
 ## Features
 
 - **GitHub Integration**: Create repositories and configure CI/CD variables
-- **Cloud Resource Management**: 
+- **Cloud Resource Management**:
   - Database provisioning and configuration
   - Container deployment and management
   - Storage bucket creation and configuration
@@ -38,13 +38,13 @@ This project provides a set of tools and scripts for automating the infrastructu
    ```bash
    # Install Poetry if you don't have it
    # curl -sSL https://install.python-poetry.org | python3 -
-   
+
    # Install dependencies and create virtual environment
    poetry install
-   
+
    # Activate the virtual environment
    poetry shell
-   
+
    # Or run commands directly
    poetry run infra --help
    ```
@@ -53,10 +53,10 @@ This project provides a set of tools and scripts for automating the infrastructu
    ```bash
    # For GUI support
    poetry install --with gui
-   
+
    # For AI agents
    poetry install --with ai
-   
+
    # For development
    poetry install --with dev
    ```
@@ -74,11 +74,11 @@ This project provides a set of tools and scripts for automating the infrastructu
 The CLI is organized into logical command groups:
 
 ```bash
-# List available technologies
+# List available templates
 infra list templates
 
-# Complete project setup with multiple technologies (space-separated)
-infra setup project --name myproject --stack "django react postgres"
+# Complete project setup with selected template
+infra setup project --name myproject --template webapp --private --db-type postgres
 
 # Repository creation (two equivalent ways)
 infra create repo --name myproject --private
@@ -103,6 +103,9 @@ poetry install --with gui
 
 # Launch the GUI directly
 poetry run infra gui
+
+# For debugging purposes
+./run_gui_debug.sh
 ```
 
 Alternatively, you can build a standalone macOS application:
@@ -139,13 +142,21 @@ infra/
 ├── .env                # Actual credentials (not in Git)
 ├── setup.py            # py2app setup for macOS app building
 ├── build_macos_app.sh  # Script to build macOS app
+├── run_gui_debug.sh    # Script to run GUI in debug mode
+├── logs/               # Application logs directory
 ├── infra/              # Main module
 │   ├── __init__.py
 │   ├── cli.py          # Command-line interface
 │   ├── config.py       # Configuration handling
+│   ├── project_setup/  # Project setup functionality
+│   │   ├── __init__.py
+│   │   └── core.py     # Core project setup logic
 │   ├── providers/      # Service providers
 │   │   ├── __init__.py
 │   │   ├── git/        # GitHub/GitLab operations
+│   │   ├── local/      # Local environment operations
+│   │   │   ├── __init__.py
+│   │   │   └── env.py  # Environment file handling
 │   │   └── cloud/      # Cloud providers
 │   │       ├── __init__.py
 │   │       ├── yandex/ # Yandex Cloud specific
@@ -154,32 +165,32 @@ infra/
 │   │       │   ├── storage/  # Object storage
 │   │       │   └── compute/  # Containers/VMs
 │   │       └── aws/    # Other cloud providers
-│   ├── agents/         # AI agents for automation
-│   │   ├── __init__.py
-│   │   ├── base.py     # Base agent class
-│   │   └── ...
+│   ├── agents/         # AI agents for automation (planned)
+│   │   └── __init__.py
 │   ├── templates/      # Project boilerplate templates
-│   │   ├── django/
-│   │   ├── react/
-│   │   └── ...
+│   │   ├── __init__.py
+│   │   ├── generator.py # Template generation logic
+│   │   ├── zero/        # Zero configuration template
+│   │   ├── webapp/      # Web application template
+│   │   └── chatbot/     # Chatbot application template
 │   ├── gui/            # Graphical interfaces
 │   │   ├── README.md   # GUI documentation
 │   │   ├── __init__.py # GUI module initialization
 │   │   ├── app.py      # Main application entry point
 │   │   ├── main_window.py # Main window implementation
 │   │   ├── resources/  # Icons and resources
+│   │   ├── widgets/    # Reusable GUI widgets
 │   │   ├── logging/    # Log display components
 │   │   ├── settings/   # Settings management
 │   │   ├── project/    # Project setup UI
 │   │   ├── create/     # Resource creation UI
 │   │   ├── templates/  # Template browser
-│   │   └── operations/ # Operation execution
+│   │   ├── operations/ # Operation execution
+│   │   └── macos/      # macOS-specific components
 │   └── utils/          # Helper functions
-│       ├── __init__.py
-│       └── ...
+│       └── __init__.py
 └── tests/              # Tests
-    ├── __init__.py
-    └── ...
+    └── __init__.py
 ```
 
 ## Extending
@@ -187,17 +198,13 @@ infra/
 The modular architecture makes it easy to add new functionality:
 
 1. **New Cloud Providers**: Add a new module under `infra/providers/cloud/`
-2. **New Project Templates**: 
+2. **New Project Templates**:
    - Add template files to `infra/templates/` directory
-   - Register the template in `infra/cli.py` by adding it to the `PROJECT_TEMPLATES` dictionary with the following structure:
-     ```python
-     "template_name": {
-         "description": "Short description of template",
-         "technologies": ["tech1", "tech2", "tech3"],
-         "details": "Detailed description of the template and its components"
-     }
-     ```
-   - Ensure all used technologies are reflected in both the template files and code registration
+   - Available templates currently include:
+     - `zero`: Minimal project scaffolding
+     - `webapp`: Web application template
+     - `chatbot`: Chatbot application template
+   - Register the template in `infra/templates/__init__.py`
 3. **New AI Agents**: Implement new agents in `infra/agents/`
 4. **New CLI Commands**: Extend existing command groups or add new ones in `infra/cli.py`
 

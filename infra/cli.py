@@ -42,7 +42,7 @@ PROJECT_TEMPLATES = {
 
 # All technologies used across templates
 AVAILABLE_TECHNOLOGIES = sorted(list(set(
-    tech for template in PROJECT_TEMPLATES.values() 
+    tech for template in PROJECT_TEMPLATES.values()
     for tech in template["technologies"]
 )))
 
@@ -51,14 +51,14 @@ def validate_template(ctx, param, value: str) -> Dict[str, Any]:
     """Validate template selection."""
     if not value:
         raise click.BadParameter("Template name is required")
-    
+
     if value not in PROJECT_TEMPLATES:
         available_templates = ", ".join(PROJECT_TEMPLATES.keys())
         raise click.BadParameter(
             f"Invalid template: {value}\n"
             f"Available templates are: {available_templates}"
         )
-    
+
     return PROJECT_TEMPLATES[value]
 
 
@@ -107,7 +107,7 @@ def git_repo_create(project_name: str, private: bool, debug: bool):
     """Create a GitHub repository."""
     click.echo(f"Creating {'private' if private else 'public'} repository: {project_name}")
     repository, already_existed = create_repository(project_name, private)
-    
+
     if already_existed:
         click.echo(f"Repository already exists: {repository.html_url}")
     else:
@@ -130,7 +130,7 @@ def create_repo(name: str, private: bool, debug: bool):
     """Create a GitHub repository."""
     click.echo(f"Creating {'private' if private else 'public'} repository: {name}")
     repository, already_existed = create_repository(name, private)
-    
+
     if already_existed:
         click.echo(f"Repository already exists: {repository.html_url}")
     else:
@@ -180,7 +180,7 @@ def setup(debug: bool):
 @setup.command("project")
 @click.option("--name", required=True, help="Project name")
 @click.option(
-    "--template", 
+    "--template",
     required=True,
     help="Project template to use (e.g. 'webapp', 'chatbot')",
     callback=validate_template
@@ -188,33 +188,35 @@ def setup(debug: bool):
 @click.option("--private/--public", default=True, help="Create a private repository")
 @click.option("--db-type", default="postgres", help="Database type")
 @click.option("--db-name", help="Database name (defaults to project name)")
+@click.option("--yandex", is_flag=True, help="Enable Yandex Cloud operations")
 @common_options
 def setup_project(
-    name: str, 
-    template: Dict[str, Any], 
-    private: bool, 
-    db_type: str, 
+    name: str,
+    template: Dict[str, Any],
+    private: bool,
+    db_type: str,
     db_name: Optional[str] = None,
+    yandex: bool = False,
     debug: bool = False
 ):
     """
     Set up a complete project infrastructure.
-    
+
     This command will:
     1. Create GitHub repository
     2. Check local project directory
     3. Create or initialize local project with selected template
     4. Set up CI/CD variables
-    5. Create database in the cloud
-    6. Set up container infrastructure
+    5. Create database in the cloud (if --yandex flag is set)
+    6. Set up container infrastructure (if --yandex flag is set)
     """
     technologies = template["technologies"]
     template_name = next(name for name, data in PROJECT_TEMPLATES.items() if data == template)
-    
+
     click.echo(f"Setting up project '{name}' using template: {template_name}")
     click.echo(f"Template description: {template['description']}")
     click.echo(f"Technologies included: {', '.join(technologies)}")
-    
+
     try:
         setup_project_operation(
             name=name,
@@ -223,6 +225,7 @@ def setup_project(
             db_type=db_type,
             db_name=db_name,
             template_name=template_name,
+            use_yandex_cloud=yandex,
             log_callback=click.echo
         )
     except SetupError as e:
@@ -268,4 +271,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
