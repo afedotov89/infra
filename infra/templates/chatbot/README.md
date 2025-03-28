@@ -16,7 +16,7 @@ backend/
 │   ├── asgi.py
 │   └── wsgi.py
 ├── apps/
-│   └── api/
+│   └── bot/
 │       ├── __init__.py
 │       ├── views.py
 │       └── urls.py
@@ -54,4 +54,4 @@ The API is built using Django REST Framework. Additional endpoints can be added 
 
 - Adjust the SECRET_KEY in `project/settings.py` for production.
 - Debug mode is enabled by default; change it as needed.
-- Extend the project structure by adding more apps or configurations as your project grows. 
+- Extend the project structure by adding more apps or configurations as your project grows.

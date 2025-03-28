@@ -10,6 +10,8 @@ import environ  # noqa
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+RESOURCES_DIR = BASE_DIR / 'bot' / 'resources'
+
 env = environ.Env(
     DEBUG=(bool, True)
 )
@@ -26,6 +28,22 @@ DEBUG = env.bool('DEBUG', default=True)
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
+OPENAI_API_KEY = env.str('OPENAI_API_KEY', default='')
+DEFAULT_AI_MODEL = env.str('DEFAULT_AI_MODEL', default='gpt-4o-mini')
+
+# Celery settings
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='')
+CELERY_RESULT_BACKEND = env('CELERY_BROKER_URL', default='')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+
+BOTS = {
+    'simple_bot': {
+        'class': 'apps.bot.bot.SimpleAIBot',
+        'telegram_token': env.str('TELEGRAM_TOKEN', default=''),
+    }
+}
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -36,7 +54,10 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'apps.api',
+    'apps.bot',
+    'assistant.bot',
+    # 'assistant.storage',
+    'assistant.admin',
 ]
 
 MIDDLEWARE = [
@@ -109,6 +130,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'static'
+
+# Media files (User uploaded files)
+MEDIA_URL = 'media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -123,3 +149,50 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
 }
+
+
+# Logging configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'DEBUG' if DEBUG else 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'bot': {
+            'handlers': ['console'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'assistant': {
+            'handlers': ['console'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+

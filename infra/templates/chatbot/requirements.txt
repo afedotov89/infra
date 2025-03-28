@@ -1,4 +1,1 @@
-Django==4.2.10
-djangorestframework==3.14.0
-psycopg2-binary==2.9.9
-django-environ==0.9.0
+git+https://github.com/afedotov89/django-assistant-bot.git@6cf4d45b9774443d3c990b19f3b18f3e85c121d8
