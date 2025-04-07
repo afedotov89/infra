@@ -6,6 +6,8 @@ import logging
 import os  # Add os import for path joining
 from pathlib import Path # Import Path
 import copy # Import copy
+import secrets
+import string
 from infra.project_setup.environment import (
     setup_python_environment,
     setup_database,
@@ -46,6 +48,20 @@ def setup(ctx: 'ProjectSetupContext') -> str:
 def _setup_backend(ctx: 'ProjectSetupContext') -> str:
     """Sets up the backend environment (Python venv and database)."""
     logger.debug("Starting backend setup.")
+
+    # Set Yandex Cloud infrastructure names based on project name
+    project_name = ctx.name
+    ctx.github_secrets['YC_API_GATEWAY_NAME'] = f"{project_name}-api-gateway"
+    ctx.github_secrets['YC_BUCKET_NAME'] = project_name
+    ctx.github_secrets['YC_CONTAINER_NAME'] = f"{project_name}-backend"
+    ctx.github_secrets['CORS_ALLOWED_ORIGINS'] = f"https://{project_name}.website.yandexcloud.net"
+
+    # Generate Django Secret Key
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    django_key = ''.join(secrets.choice(alphabet) for i in range(50))
+    ctx.github_secrets['DJANGO_SECRET_KEY'] = django_key
+
+    logger.info(f"Set YC infrastructure secrets and generated Django key for project: {project_name}")
 
     # Use original project_dir from ctx to determine the backend path
     backend_dir = Path(ctx.project_dir) / 'backend'

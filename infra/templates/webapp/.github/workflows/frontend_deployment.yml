@@ -99,12 +99,12 @@ jobs:
 
           # Создаем .env.production файл для Next.js сборки
           cat > ./frontend/.env.production << EOF
-          NEXT_PUBLIC_API_URL=https://$API_GW_URL
+          NEXT_PUBLIC_API_BASE_URL=https://$API_GW_URL
           # Другие переменные окружения для production
           EOF
 
           echo "Созданы переменные окружения для сборки фронтенда"
-          echo "NEXT_PUBLIC_API_URL установлен на https://$API_GW_URL"
+          echo "NEXT_PUBLIC_API_BASE_URL установлен на https://$API_GW_URL"
 
       - name: Build Next.js app
         working-directory: ./frontend

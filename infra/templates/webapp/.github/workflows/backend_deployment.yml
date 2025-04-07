@@ -46,6 +46,35 @@ jobs:
           yc config set service-account-key sa-key.json
           yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
 
+      - name: Prepare Allowed Hosts
+        id: prepare_hosts
+        env:
+          YC_API_GATEWAY_NAME: ${{ secrets.YC_API_GATEWAY_NAME }}
+          SECRET_ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
+        run: |
+          echo "Checking for existing API Gateway: ${YC_API_GATEWAY_NAME}"
+          API_GW_URL=$(yc serverless api-gateway get --name "${YC_API_GATEWAY_NAME}" --format json 2>/dev/null | jq -r '.domain // empty')
+
+          FINAL_ALLOWED_HOSTS="${SECRET_ALLOWED_HOSTS}"
+
+          if [[ -n "$API_GW_URL" ]]; then
+            echo "API Gateway found with URL: ${API_GW_URL}"
+            if [[ -n "$FINAL_ALLOWED_HOSTS" ]]; then
+              # Add gateway URL with comma if SECRET_ALLOWED_HOSTS is not empty
+              FINAL_ALLOWED_HOSTS="${API_GW_URL},${FINAL_ALLOWED_HOSTS}"
+            else
+              # Use only gateway URL if SECRET_ALLOWED_HOSTS is empty
+              FINAL_ALLOWED_HOSTS="${API_GW_URL}"
+            fi
+          else
+            echo "API Gateway not found or no domain returned. Using SECRET_ALLOWED_HOSTS."
+          fi
+
+          echo "Final ALLOWED_HOSTS for deployment: ${FINAL_ALLOWED_HOSTS}"
+          # Use ::set-output for older runners compatibility, GITHUB_ENV preferred for newer
+          # echo "DYNAMIC_ALLOWED_HOSTS=${FINAL_ALLOWED_HOSTS}" >> $GITHUB_ENV
+          echo "::set-output name=dynamic_hosts::${FINAL_ALLOWED_HOSTS}"
+
       - name: Deploy to Yandex Serverless Containers
         env:
           YC_CONTAINER_NAME: ${{ secrets.YC_CONTAINER_NAME }}
@@ -53,11 +82,9 @@ jobs:
           YC_FOLDER_ID: ${{ secrets.YC_FOLDER_ID }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
-          ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
           CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
           YC_SERVICE_ACCOUNT_ID: ${{ secrets.YC_SERVICE_ACCOUNT_ID }}
           YC_NETWORK_ID: ${{ secrets.YC_NETWORK_ID }}
-          YC_SUBNET_IDS: ${{ secrets.YC_SUBNET_IDS }}
         run: |
           # Создаем или обновляем контейнер
           yc serverless container revisions deploy \
@@ -69,11 +96,10 @@ jobs:
             --concurrency 8 \
             --execution-timeout 60s \
             --network-id "${YC_NETWORK_ID}" \
-            --subnets "${YC_SUBNET_IDS}" \
             --environment DJANGO_SETTINGS_MODULE=project.settings \
             --environment DATABASE_URL="${DATABASE_URL}" \
             --environment SECRET_KEY="${DJANGO_SECRET_KEY}" \
-            --environment ALLOWED_HOSTS="${ALLOWED_HOSTS}" \
+            --environment ALLOWED_HOSTS="${{ steps.prepare_hosts.outputs.dynamic_hosts }}" \
             --environment DEBUG=False \
             --environment CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS}" \
             --service-account-id "${YC_SERVICE_ACCOUNT_ID}"
@@ -117,7 +143,7 @@ jobs:
                   type: serverless_containers
                   container_id: $CONTAINER_ID
                   service_account_id: "${YC_SERVICE_ACCOUNT_ID}"
-            /{path}:
+            /{path+}:
               x-yc-apigateway-any-method:
                 parameters:
                   - name: path
