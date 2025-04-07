@@ -148,23 +148,21 @@ infra/
 │   ├── __init__.py
 │   ├── cli.py          # Command-line interface
 │   ├── config.py       # Configuration handling
-│   ├── project_setup/  # Project setup functionality
-│   │   ├── __init__.py
-│   │   └── core.py     # Core project setup logic
-│   ├── providers/      # Service providers
-│   │   ├── __init__.py
-│   │   ├── git/        # GitHub/GitLab operations
-│   │   ├── local/      # Local environment operations
+│   │   ├── project_setup/  # Project setup functionality
 │   │   │   ├── __init__.py
-│   │   │   └── env.py  # Environment file handling
-│   │   └── cloud/      # Cloud providers
+│   │   │   └── core.py     # Core project setup logic
+│   │   │   └── environment.py # Environment setup functions (DB, venv, etc.)
+│   │   └── providers/      # Service providers
 │   │       ├── __init__.py
-│   │       ├── yandex/ # Yandex Cloud specific
-│   │       │   ├── __init__.py
-│   │       │   ├── db/       # Cloud databases
-│   │       │   ├── storage/  # Object storage
-│   │       │   └── compute/  # Containers/VMs
-│   │       └── aws/    # Other cloud providers
+│   │       ├── git/        # GitHub/GitLab operations
+│   │       └── cloud/      # Cloud providers
+│   │           ├── __init__.py
+│   │           ├── yandex/ # Yandex Cloud specific
+│   │           │   ├── __init__.py
+│   │           │   ├── db/       # Cloud databases
+│   │           │   ├── storage/  # Object storage
+│   │           │   └── compute/  # Containers/VMs
+│   │           └── aws/    # Other cloud providers
 │   ├── agents/         # AI agents for automation (planned)
 │   │   └── __init__.py
 │   ├── templates/      # Project boilerplate templates
@@ -172,6 +170,7 @@ infra/
 │   │   ├── generator.py # Template generation logic
 │   │   ├── zero/        # Zero configuration template
 │   │   ├── webapp/      # Web application template
+│   │   │   └── template_setup.py # Example template-specific setup script
 │   │   └── chatbot/     # Chatbot application template
 │   ├── gui/            # Graphical interfaces
 │   │   ├── README.md   # GUI documentation
@@ -201,10 +200,15 @@ The modular architecture makes it easy to add new functionality:
 2. **New Project Templates**:
    - Add template files to `infra/templates/` directory
    - Available templates currently include:
-     - `zero`: Minimal project scaffolding
+     - `zero`: Minimal project scaffolding (no specific setup)
      - `webapp`: Web application template
      - `chatbot`: Chatbot application template
    - Register the template in `infra/templates/__init__.py`
+   - **Optional**: Create a `template_setup.py` file in the template's root directory.
+     - This script should contain a `setup(ctx: ProjectSetupContext) -> str` function.
+     - This function will be called by the core setup process after template files are copied.
+     - Use this script to perform template-specific environment setup, like initializing a Python venv, creating databases (using functions from `infra.project_setup.environment`), or running initial setup commands.
+     - The function should return the final database name used (if applicable).
 3. **New AI Agents**: Implement new agents in `infra/agents/`
 4. **New CLI Commands**: Extend existing command groups or add new ones in `infra/cli.py`
 

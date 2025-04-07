@@ -56,6 +56,8 @@ jobs:
           ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
           CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
           YC_SERVICE_ACCOUNT_ID: ${{ secrets.YC_SERVICE_ACCOUNT_ID }}
+          YC_NETWORK_ID: ${{ secrets.YC_NETWORK_ID }}
+          YC_SUBNET_IDS: ${{ secrets.YC_SUBNET_IDS }}
         run: |
           # Создаем или обновляем контейнер
           yc serverless container revisions deploy \
@@ -66,6 +68,8 @@ jobs:
             --cores 1 \
             --concurrency 8 \
             --execution-timeout 60s \
+            --network-id "${YC_NETWORK_ID}" \
+            --subnets "${YC_SUBNET_IDS}" \
             --environment DJANGO_SETTINGS_MODULE=project.settings \
             --environment DATABASE_URL="${DATABASE_URL}" \
             --environment SECRET_KEY="${DJANGO_SECRET_KEY}" \
@@ -73,18 +77,18 @@ jobs:
             --environment DEBUG=False \
             --environment CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS}" \
             --service-account-id "${YC_SERVICE_ACCOUNT_ID}"
-          
+
           # Получаем URL контейнера
           CONTAINER_URL=$(yc serverless container get "${YC_CONTAINER_NAME}" --format json | jq -r '.url')
           echo "Deployed container URL: $CONTAINER_URL"
-          
+
           # Сохраняем URL контейнера для использования в следующих шагах
           echo "CONTAINER_URL=$CONTAINER_URL" >> $GITHUB_ENV
-          
+
           echo "Миграции запускаются автоматически при старте контейнера через entrypoint.sh"
           echo "Ожидаем 10 секунд, чтобы контейнер инициализировался и запустил миграции..."
           sleep 10
-      
+
       - name: Update or Create API Gateway
         env:
           YC_CONTAINER_NAME: ${{ secrets.YC_CONTAINER_NAME }}
@@ -94,7 +98,7 @@ jobs:
         run: |
           # Получаем ID ревизии контейнера
           CONTAINER_ID=$(yc serverless container get "${YC_CONTAINER_NAME}" --format json | jq -r '.id')
-          
+
           # Создаем временный файл спецификации API Gateway
           cat > api-gw-spec.yaml << EOF
           openapi: 3.0.0
@@ -126,10 +130,10 @@ jobs:
                   container_id: $CONTAINER_ID
                   service_account_id: "${YC_SERVICE_ACCOUNT_ID}"
           EOF
-          
+
           # Проверяем, существует ли API Gateway
           API_GATEWAY_EXISTS=$(yc serverless api-gateway list --format=json | jq -r --arg name "${YC_API_GATEWAY_NAME}" '.[] | select(.name==$name) | .id')
-          
+
           if [ -z "$API_GATEWAY_EXISTS" ]; then
             echo "API Gateway '${YC_API_GATEWAY_NAME}' не существует, создаем..."
             yc serverless api-gateway create \
@@ -142,25 +146,25 @@ jobs:
               --spec api-gw-spec.yaml \
               --folder-id "${YC_FOLDER_ID}"
           fi
-          
+
           # Получаем URL API Gateway
           API_GW_URL=$(yc serverless api-gateway get "${YC_API_GATEWAY_NAME}" --format json | jq -r '.domain')
           echo "API Gateway URL: $API_GW_URL"
-          
+
           # Сохраняем URL API Gateway для использования в следующих шагах
           echo "API_GW_URL=$API_GW_URL" >> $GITHUB_ENV
-      
+
       - name: Health check
         run: |
           echo "Проверяем доступность сервиса через API Gateway: https://$API_GW_URL"
-          
+
           # Пробуем получить ответ от сервиса
           MAX_RETRIES=10
           COUNT=0
           while [ $COUNT -lt $MAX_RETRIES ]; do
             # Проверяем эндпоинт /health/
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$API_GW_URL/health/")
-                        
+
             if [ "$HTTP_STATUS" = "200" ]; then
               echo "Сервис запущен и готов к работе!"
               break
@@ -170,8 +174,8 @@ jobs:
               COUNT=$((COUNT+1))
             fi
           done
-          
+
           if [ $COUNT -eq $MAX_RETRIES ]; then
             echo "Сервис не запустился после $MAX_RETRIES попыток!"
             exit 1
-          fi 
+          fi

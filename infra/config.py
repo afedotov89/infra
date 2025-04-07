@@ -29,7 +29,6 @@ class Config:
     """
 
     _config_data = None
-    _database_info = {}
 
     @classmethod
     def _load_config(cls) -> Dict[str, Any]:
@@ -40,7 +39,6 @@ class Config:
             Dict with configuration parameters
         """
         if cls._config_data is None:
-            from infra.providers.local.env import ProjectEnv
 
             # Получаем путь к .env файлу из переменной окружения или используем значение по умолчанию
             env_file = os.environ.get("INFRA_ENV_FILE", ".env")
@@ -221,72 +219,3 @@ class Config:
         os.makedirs(projects_dir, exist_ok=True)
 
         return Path(projects_dir)
-
-    @classmethod
-    def save_database_info(cls, project_name: str, db_info: Dict[str, Any]) -> None:
-        """
-        Save database information for a project.
-
-        Args:
-            project_name: Project name
-            db_info: Database information dictionary
-        """
-        cls._database_info[project_name] = db_info
-
-        # Also save to a file for persistence
-        config_dir = os.path.expanduser("~/.infra")
-        os.makedirs(config_dir, exist_ok=True)
-
-        db_info_file = os.path.join(config_dir, "db_info.json")
-
-        # Load existing data if file exists
-        existing_data = {}
-        if os.path.exists(db_info_file):
-            try:
-                with open(db_info_file, 'r') as f:
-                    existing_data = json.load(f)
-            except (json.JSONDecodeError, FileNotFoundError):
-                # If file is corrupted or not found, start with empty dict
-                existing_data = {}
-
-        # Update with new data
-        existing_data[project_name] = db_info
-
-        # Write back to file
-        with open(db_info_file, 'w') as f:
-            json.dump(existing_data, f, indent=2)
-
-        logger.debug(f"Saved database info for project {project_name}")
-
-    @classmethod
-    def get_database_info(cls, project_name: str) -> Optional[Dict[str, Any]]:
-        """
-        Get database information for a project.
-
-        Args:
-            project_name: Project name
-
-        Returns:
-            Database information dictionary or None if not found
-        """
-        # First check in-memory cache
-        if project_name in cls._database_info:
-            return cls._database_info[project_name]
-
-        # If not in memory, try to load from file
-        config_dir = os.path.expanduser("~/.infra")
-        db_info_file = os.path.join(config_dir, "db_info.json")
-
-        if os.path.exists(db_info_file):
-            try:
-                with open(db_info_file, 'r') as f:
-                    all_db_info = json.load(f)
-
-                if project_name in all_db_info:
-                    # Cache it for future use
-                    cls._database_info[project_name] = all_db_info[project_name]
-                    return all_db_info[project_name]
-            except (json.JSONDecodeError, FileNotFoundError):
-                logger.warning(f"Could not load database info from {db_info_file}")
-
-        return None

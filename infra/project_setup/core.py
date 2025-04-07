@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any, Callable
 import subprocess
 import os
+import importlib
+
+from dotenv import load_dotenv
 
 from infra.config import Config, ConfigError
 from infra.providers.git import (
@@ -19,7 +22,18 @@ from infra.providers.git import (
     LocalGitError
 )
 from infra.providers.git.local import find_github_secrets_in_workflow, is_git_initialized
-from infra.providers.git.github import setup_cicd
+from infra.providers.git.github import (
+    create_repository as create_github_repo,
+    set_repository_secret,
+    setup_cicd,
+    get_repository_secrets
+)
+from infra.project_setup.environment import (
+    setup_python_environment,
+    setup_database,
+    setup_frontend_environment,
+)
+from infra.project_setup.types import ProjectSetupContext
 
 logger = logging.getLogger(__name__)
 
@@ -29,109 +43,60 @@ class SetupError(Exception):
     pass
 
 
-def _setup_python_environment(project_dir: Path, log_func: Callable) -> None:
+def _setup_project_specific_environment(ctx: ProjectSetupContext) -> str:
     """
-    Set up a Python virtual environment for the project if Python files and requirements.txt are present.
-    Uses the latest Python version from pyenv.
+    Set up project-specific environment by executing template_setup.py if found.
 
-    Args:
-        project_dir: Path to the project directory
-        log_func: Function to use for logging
+    :param ctx: The project setup context object.
+    :type ctx: ProjectSetupContext
+    :return: The final database name used or determined by the template setup script.
+    :rtype: str
     """
-    logger.debug(f"Checking if project has Python files and requirements.txt")
+    logger.debug("Setting up project-specific environment via template_setup.py if available")
+    final_db_name = ctx.db_name or ctx.name  # Default db name if not provided or overridden
+    template_setup_path = ctx.project_dir / "template_setup.py"
 
-    # Check if project has Python files
-    python_files = list(project_dir.glob("**/*.py"))
-    has_requirements = (project_dir / "requirements.txt").exists()
+    if template_setup_path.exists():
+        logger.info(f"Found template setup script: {template_setup_path}")
+        ctx.log_func(f"🔄 Running template-specific environment setup...")
 
-    if not python_files or not has_requirements:
-        logger.debug(f"Project doesn't have Python files or requirements.txt, skipping venv setup")
-        return
+        # Add project directory to path to allow importing template_setup
+        sys.path.insert(0, str(ctx.project_dir.parent)) # Add parent to import 'project_dir.template_setup'
+        module_name = f"{ctx.project_dir.name}.template_setup"
 
-    log_func("🔄 Setting up Python virtual environment...")
-
-    try:
-        # Check if pyenv is installed
         try:
-            subprocess.run(["pyenv", "--version"], check=True, capture_output=True)
-        except (subprocess.SubprocessError, FileNotFoundError):
-            log_func("⚠️  pyenv is not installed or not in PATH, skipping virtual environment setup")
-            return
+            template_module = importlib.import_module(module_name)
+            if hasattr(template_module, "setup"):
+                # Call the setup function from the template's script
+                final_db_name = template_module.setup(ctx)
+                logger.info(f"Template setup script executed successfully. Final DB name: {final_db_name}")
+                ctx.log_func(f"ℹ️  Template-specific environment setup complete.")
+            else:
+                logger.warning(f"template_setup.py found but 'setup' function is missing.")
+                ctx.log_func(f"⚠️ Template setup script found but 'setup' function is missing.")
 
-        # Get latest Python version from pyenv
-        result = subprocess.run(
-            ["pyenv", "versions", "--bare"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
+        except ImportError as e:
+            logger.error(f"Failed to import template setup script '{module_name}': {e}")
+            ctx.log_func(f"⚠️ Error importing template setup script: {e}")
+        except Exception as e:
+            logger.error(f"Error executing template setup script: {e}", exc_info=True)
+            ctx.log_func(f"⚠️ Error executing template setup script: {e}")
+            # Decide if this should be a fatal error
+            # raise SetupError(f"Failed to execute template setup script: {e}") from e
+        finally:
+            # Clean up sys.path
+            if str(ctx.project_dir.parent) in sys.path:
+                sys.path.remove(str(ctx.project_dir.parent))
+            # Remove potentially cached module
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+    else:
+        logger.info("No template_setup.py found. Skipping template-specific environment setup.")
+        ctx.log_func("ℹ️  No template-specific setup script (template_setup.py) found.")
+        # Optionally, run default logic here if needed for templates without the script
+        # For now, we assume the script handles everything or nothing is needed.
 
-        versions = [v.strip() for v in result.stdout.splitlines() if v.strip()]
-        if not versions:
-            log_func("⚠️  No Python versions found in pyenv, skipping virtual environment setup")
-            return
-
-        # Sort versions and get the latest one
-        # Filter only versions that match numeric format (x.y.z)
-        import re
-        numeric_versions = [v for v in versions if re.match(r'^\d+\.\d+\.\d+$', v)]
-        if not numeric_versions:
-            # If no numeric versions, use whatever is available
-            latest_version = versions[-1]
-        else:
-            # Sort numeric versions
-            latest_version = sorted(numeric_versions, key=lambda v: [int(x) for x in v.split('.')], reverse=True)[0]
-
-        logger.debug(f"Using Python version {latest_version} for virtual environment")
-        log_func(f"   Using Python version {latest_version}")
-
-        # Check if .venv directory already exists
-        venv_dir = project_dir / ".venv"
-        if venv_dir.exists():
-            logger.debug(f"Virtual environment already exists at {venv_dir}")
-            log_func(f"ℹ️ Virtual environment already exists, skipping creation")
-            return
-
-        # Use pyenv with specific Python version to create virtualenv
-        subprocess.run(
-            ["pyenv", "exec", "python", "-m", "venv", str(venv_dir)],
-            check=True,
-            cwd=project_dir,
-            env={**os.environ, "PYENV_VERSION": latest_version}
-        )
-
-        # Get path to pip in the virtual environment
-        if sys.platform == "win32":
-            pip_path = venv_dir / "Scripts" / "pip"
-        else:
-            pip_path = venv_dir / "bin" / "pip"
-
-        # Upgrade pip
-        subprocess.run(
-            [str(pip_path), "install", "--upgrade", "pip"],
-            check=True,
-            cwd=project_dir
-        )
-
-        # Install requirements
-        subprocess.run(
-            [str(pip_path), "install", "--no-cache-dir", "-r", "requirements.txt"],
-            check=True,
-            cwd=project_dir
-        )
-
-        log_func(f"✅ Python virtual environment created and requirements installed")
-        logger.debug(f"Successfully set up Python virtual environment in {venv_dir}")
-
-    except subprocess.CalledProcessError as e:
-        stderr_msg = e.stderr.decode() if hasattr(e.stderr, 'decode') else e.stderr
-        logger.error(f"Failed to set up Python environment: {stderr_msg if stderr_msg else str(e)}")
-        log_func(f"⚠️  Failed to set up Python environment: {str(e)}")
-        log_func(f"   Continuing with project setup...")
-    except Exception as e:
-        logger.error(f"Unexpected error setting up Python environment: {str(e)}")
-        log_func(f"⚠️  Unexpected error setting up Python environment: {str(e)}")
-        log_func(f"   Continuing with project setup...")
+    return final_db_name
 
 
 def setup_project(
@@ -143,7 +108,8 @@ def setup_project(
     template_name: Optional[str] = None,
     use_yandex_cloud: bool = False,
     use_local_docker: bool = True,
-    log_callback = None
+    log_callback = None,
+    debug: bool = False
 ) -> Dict[str, Any]:
     """
     Set up a complete project infrastructure based on a template.
@@ -154,27 +120,34 @@ def setup_project(
     3. Creates or initializes local project with template files
     4. Creates database in the cloud (if use_yandex_cloud is True) or locally in Docker (if use_local_docker is True)
     5. Sets up GitHub secrets based on workflow needs and DB credentials
-    6. Pushes code to GitHub
-    7. Sets up CI/CD variables
+    6. Sets up CI/CD variables
+    7. Pushes code to GitHub
     8. Sets up container infrastructure (if use_yandex_cloud is True)
     9. Finalizes project setup
 
-    Args:
-        name: Project name
-        technologies: List of technologies included in the project
-        private: Whether the repository should be private
-        db_type: Database type
-        db_name: Database name (defaults to project name)
-        template_name: Name of the template to use (if specified)
-        use_yandex_cloud: Whether to use Yandex Cloud for database and container infrastructure
-        use_local_docker: Whether to create a local Docker database
-        log_callback: Optional callback function for logging. If None, print to stdout.
-
-    Returns:
-        Dict with setup results including repository URL, project directory, etc.
-
-    Raises:
-        SetupError: If project setup fails
+    :param name: Project name
+    :type name: str
+    :param technologies: List of technologies included in the project
+    :type technologies: List[str]
+    :param private: Whether the repository should be private, defaults to True
+    :type private: bool, optional
+    :param db_type: Database type, defaults to "postgres"
+    :type db_type: str, optional
+    :param db_name: Database name (defaults to project name), defaults to None
+    :type db_name: Optional[str], optional
+    :param template_name: Name of the template to use (if specified), defaults to None
+    :type template_name: Optional[str], optional
+    :param use_yandex_cloud: Whether to use Yandex Cloud for database and container infrastructure, defaults to False
+    :type use_yandex_cloud: bool, optional
+    :param use_local_docker: Whether to create a local Docker database, defaults to True
+    :type use_local_docker: bool, optional
+    :param log_callback: Optional callback function for logging. If None, print to stdout., defaults to None
+    :type log_callback: Callable, optional
+    :param debug: Whether to enable debug logging with stack traces, defaults to False
+    :type debug: bool, optional
+    :return: Dict with setup results including repository URL, project directory, etc.
+    :rtype: Dict[str, Any]
+    :raises SetupError: If project setup fails
     """
     if not technologies and not template_name:
         logger.debug("Neither technologies nor template_name were specified")
@@ -217,31 +190,59 @@ def setup_project(
             template_name
         )
 
-        # Step 3.5: Set up Python virtual environment if needed
-        logger.debug("Step 3.5: Setting up Python virtual environment if needed")
-        _setup_python_environment(project_dir, log)
+        # Step 3.5 & 4: Set up project-specific environment (Python venv, database)
+        logger.debug("Step 3.5 & 4: Setting up project-specific environment")
+        # Create context object
+        setup_ctx = ProjectSetupContext(
+            name=name,
+            technologies=technologies,
+            db_type=db_type,
+            db_name=db_name,
+            use_yandex_cloud=use_yandex_cloud,
+            use_local_docker=use_local_docker,
+            project_dir=project_dir,
+            log_func=log
+        )
 
-        # Step 4: Create database (moved earlier in the process)
-        logger.debug("Step 4: Creating database")
-        if any(tech.lower() in ['postgres', 'postgresql'] for tech in technologies):
-            logger.debug("PostgreSQL is in technologies list, creating database")
-            final_db_name = _create_database(name, db_type, db_name, log, use_yandex_cloud, use_local_docker)
-        else:
-            logger.debug("PostgreSQL is not in technologies list, skipping database creation")
-            log("ℹ️ Skipping database creation as PostgreSQL is not in technologies list")
-            final_db_name = db_name or name
+        # --- DEBUG LOG: Context ID --- #
+        logger.debug(f"Created context object with id: {id(setup_ctx)}")
+        # --- END DEBUG LOG --- #
+
+        # --- Fetch Existing GitHub Secrets (Early) --- #
+        log("🔄 Fetching existing secrets from GitHub...")
+        try:
+            # Store existing secret names in the context
+            setup_ctx.existing_github_secrets = get_repository_secrets(setup_ctx.name)
+            # --- DEBUG LOG: Inside Try --- #
+            logger.debug(f"Assigned existing secrets in setup_project (try block): {setup_ctx.existing_github_secrets} (type: {type(setup_ctx.existing_github_secrets)})")
+            # --- END DEBUG LOG --- #
+            logger.info(f"Successfully fetched existing secrets for {setup_ctx.name}: {setup_ctx.existing_github_secrets}")
+            log(f"   Found {len(setup_ctx.existing_github_secrets)} existing secrets.")
+        except Exception as e:
+            logger.warning(f"Could not fetch existing GitHub secrets for {setup_ctx.name}: {e}", exc_info=False)
+            log(f"⚠️ Warning: Could not fetch existing secrets from GitHub for '{setup_ctx.name}'. Assuming none exist.")
+            setup_ctx.existing_github_secrets = [] # Assume none if fetch fails
+            # --- DEBUG LOG: Inside Except --- #
+            logger.debug(f"Assigned existing secrets in setup_project (except block): {setup_ctx.existing_github_secrets} (type: {type(setup_ctx.existing_github_secrets)})")
+            # --- END DEBUG LOG --- #
+
+        # Pass context object to the function
+        # --- DEBUG LOG: Before _setup_project_specific_environment --- #
+        logger.debug(f"Calling _setup_project_specific_environment with context id: {id(setup_ctx)}")
+        # --- END DEBUG LOG --- #
+        final_db_name = _setup_project_specific_environment(setup_ctx)
 
         # Step 5: Set up GitHub secrets based on workflow files
         logger.debug("Step 5: Setting up GitHub secrets")
-        _setup_github_secrets(project_dir, name, log)
+        _setup_github_secrets(setup_ctx)
 
-        # Step 6: Push code to GitHub repository
-        logger.debug("Step 6: Pushing to GitHub repository")
+        # Step 6: Set up CI/CD variables
+        logger.debug("Step 6: Setting up CI/CD variables")
+        _setup_cicd_variables(setup_ctx)
+
+        # Step 7: Push code to GitHub repository
+        logger.debug("Step 7: Pushing to GitHub repository")
         _push_to_remote(project_dir, repo.clone_url, log)
-
-        # Step 7: Set up CI/CD variables
-        logger.debug("Step 7: Setting up CI/CD variables")
-        _setup_cicd_variables(name, log)
 
         # Step 8: Set up container infrastructure
         logger.debug("Step 8: Setting up container infrastructure")
@@ -250,34 +251,43 @@ def setup_project(
         # Step 9: Complete project setup
         logger.debug("Step 9: Finalizing project setup")
         return _finalize_project_setup(
-            name, technologies, repo.html_url, project_dir, final_db_name, log
+            ctx=setup_ctx, # Pass context
+            repo_url=repo.html_url, # Pass repo URL
+            final_db_name=final_db_name # Pass final DB name
         )
 
     except ConfigError as e:
-        logger.error(f"Configuration error: {str(e)}")
-        raise SetupError(f"Configuration error: {str(e)}") from e
+        log_msg = f"Configuration error: {str(e)}"
+        logger.error(log_msg, exc_info=debug) # Use exc_info=debug
+        raise SetupError(log_msg) from e
     except LocalGitError as e:
-        logger.error(f"Git or template error: {str(e)}")
-        raise SetupError(f"Git or template error: {str(e)}") from e
+        log_msg = f"Git or template error: {str(e)}"
+        logger.error(log_msg, exc_info=debug) # Use exc_info=debug
+        raise SetupError(log_msg) from e
     except Exception as e:
-        logger.error(f"Unexpected error setting up project: {str(e)}")
-        raise SetupError(f"Unexpected error: {str(e)}") from e
+        log_msg = f"Unexpected error setting up project: {str(e)}"
+        logger.error(log_msg, exc_info=debug) # Use exc_info=debug
+        raise SetupError(log_msg) from e
+
+    finally:
+        # --- DEBUG LOG --- #
+        logger.debug(f"State after secret fetch in setup_project: ctx.existing_github_secrets = {setup_ctx.existing_github_secrets} (type: {type(setup_ctx.existing_github_secrets)})")
+        # --- END DEBUG LOG --- #
 
 
 def _create_github_repository(name: str, private: bool, log_func: Callable) -> Tuple[Any, bool]:
     """
     Step 1: Create a GitHub repository for the project.
 
-    Args:
-        name: Project name
-        private: Whether the repository should be private
-        log_func: Function to use for logging
-
-    Returns:
-        Tuple containing the repository object and a boolean indicating if it already existed
-
-    Raises:
-        LocalGitError: If repository creation fails
+    :param name: Project name
+    :type name: str
+    :param private: Whether the repository should be private
+    :type private: bool
+    :param log_func: Function to use for logging
+    :type log_func: Callable
+    :return: Tuple containing the repository object and a boolean indicating if it already existed
+    :rtype: Tuple[Any, bool]
+    :raises LocalGitError: If repository creation fails
     """
     logger.debug(f"Starting repository creation process for {name} (private={private})")
     log_func("🔄 Creating GitHub repository...")
@@ -285,7 +295,7 @@ def _create_github_repository(name: str, private: bool, log_func: Callable) -> T
 
     if already_existed:
         logger.debug(f"Repository {name} already exists at {repo.html_url}")
-        log_func(f"ℹ️ Repository already exists: {repo.html_url}")
+        log_func(f"ℹ️  Repository already exists: {repo.html_url}")
         log_func(f"   Skipping repository creation step.")
     else:
         logger.debug(f"Successfully created new repository {name} at {repo.html_url}")
@@ -298,12 +308,12 @@ def _check_project_directory(name: str, log_func: Callable) -> Tuple[Path, bool,
     """
     Step 2: Check if the local project directory exists and is empty.
 
-    Args:
-        name: Project name
-        log_func: Function to use for logging
-
-    Returns:
-        Tuple containing the project directory path, whether it exists, and whether it's empty
+    :param name: Project name
+    :type name: str
+    :param log_func: Function to use for logging
+    :type log_func: Callable
+    :return: Tuple containing the project directory path, whether it exists, and whether it's empty
+    :rtype: Tuple[Path, bool, bool]
     """
     logger.debug(f"Checking project directory for {name}")
     log_func("🔄 Checking local project directory...")
@@ -329,9 +339,10 @@ def _initialize_git_repository(project_dir: Path, log_func: Callable) -> None:
     """
     Initialize a Git repository in the specified directory.
 
-    Args:
-        project_dir: Path to the project directory
-        log_func: Function to use for logging
+    :param project_dir: Path to the project directory
+    :type project_dir: Path
+    :param log_func: Function to use for logging
+    :type log_func: Callable
     """
     logger.debug(f"Initializing git repository locally")
     subprocess.run(["git", "init", "-b", "main"], check=True, cwd=project_dir)
@@ -351,16 +362,19 @@ def _create_local_project_files(
     """
     Step 3: Set up the local project directory with template files without pushing to remote.
 
-    Args:
-        project_dir: Path to the project directory
-        dir_exists: Whether the directory already exists
-        is_empty: Whether the directory is empty
-        technologies: List of technologies to include
-        log_func: Function to use for logging
-        template_name: Name of the template to use (if specified)
-
-    Raises:
-        LocalGitError: If there's an error with Git operations or template usage
+    :param project_dir: Path to the project directory
+    :type project_dir: Path
+    :param dir_exists: Whether the directory already exists
+    :type dir_exists: bool
+    :param is_empty: Whether the directory is empty
+    :type is_empty: bool
+    :param technologies: List of technologies to include
+    :type technologies: List[str]
+    :param log_func: Function to use for logging
+    :type log_func: Callable
+    :param template_name: Name of the template to use (if specified), defaults to None
+    :type template_name: Optional[str], optional
+    :raises LocalGitError: If there's an error with Git operations or template usage
     """
     logger.debug(f"Setting up local project files in {project_dir}")
     logger.debug(f"Directory exists: {dir_exists}, is empty: {is_empty}")
@@ -380,7 +394,7 @@ def _create_local_project_files(
     else:
         directory_state = "empty" if is_empty else "non-empty"
         logger.debug(f"Using existing {directory_state} directory: {project_dir}")
-        log_func(f"ℹ️ Using existing {directory_state} directory: {project_dir}")
+        log_func(f"ℹ️  Using existing {directory_state} directory: {project_dir}")
 
     # Populate with template files if new directory or empty existing directory
     should_populate = not dir_exists or is_empty
@@ -392,7 +406,7 @@ def _create_local_project_files(
     # Initialize Git if needed
     if git_is_initialized:
         logger.debug(f"Git repository already initialized")
-        log_func(f"ℹ️ Git repository already initialized in project directory")
+        log_func(f"ℹ️  Git repository already initialized in project directory")
     else:
         _initialize_git_repository(project_dir, log_func)
 
@@ -405,13 +419,13 @@ def _push_to_remote(
     """
     Step 5: Push local project to remote repository.
 
-    Args:
-        project_dir: Path to the project directory
-        repo_url: URL of the git repository
-        log_func: Function to use for logging
-
-    Raises:
-        LocalGitError: If there's an error with Git operations
+    :param project_dir: Path to the project directory
+    :type project_dir: Path
+    :param repo_url: URL of the git repository
+    :type repo_url: str
+    :param log_func: Function to use for logging
+    :type log_func: Callable
+    :raises LocalGitError: If there's an error with Git operations
     """
     logger.debug(f"Pushing to remote repository: {repo_url}")
     log_func("🔄 Pushing to remote repository...")
@@ -479,324 +493,185 @@ def _push_to_remote(
     log_func(f"✅ Pushed to remote repository")
 
 
-def _setup_github_secrets(project_dir: Path, repo_name: str, log_func: Callable) -> None:
+def _setup_github_secrets(ctx: ProjectSetupContext) -> None:
     """
-    Step 3.5: Set up GitHub secrets for the repository based on .github/workflows scanning.
+    Step 3: Set up GitHub Actions secrets for the project using context.
 
-    This step:
-    1. Scans the .github/workflows directory for secret references
-    2. Gets these secrets from the .env file or generates them dynamically
-    3. Sets them in the GitHub repository
-
-    Args:
-        project_dir: Path to the project directory
-        repo_name: Repository name
-        log_func: Function to use for logging
+    :param ctx: The project setup context.
+    :type ctx: ProjectSetupContext
     """
-    log_func("🔄 Setting up GitHub secrets...")
+    log_func = ctx.log_func
+    repo_name = ctx.name
+    project_dir = ctx.project_dir
 
-    # Scan .github/workflows directory for secret references
+    log_func(f"🔄 Configuring GitHub repository secrets for '{repo_name}'...")
+    logger.info(f"Configuring GitHub secrets for repository {repo_name}")
+
+    # --- Determine Required Secrets ---
+    # Use helper function to find secrets defined in workflow files
     required_secrets = find_github_secrets_in_workflow(project_dir)
-
     if not required_secrets:
-        log_func("   No GitHub secrets found in workflow files.")
+        log_func("ℹ️ No GitHub secrets found referenced in workflow files. Skipping secret setup.")
+        logger.info(f"No required secrets found in workflows for {repo_name}. Skipping setup.")
         return
+    log_func(f"   Secrets required by workflows: {', '.join(required_secrets)}")
 
-    # Log found secrets
-    log_func(f"   Found {len(required_secrets)} secret references in workflow files:")
-    for secret in required_secrets:
-        log_func(f"   - {secret}")
+    # --- Identify Secrets to Set/Update ---
+    # Secrets generated during this setup run are in ctx.github_secrets
+    secrets_to_set_from_context = ctx.github_secrets
 
-    # Import these here to avoid circular imports
-    from infra.providers.git.github import generate_dynamic_secrets, get_repository_secrets
+    # Get existing secrets from the context (fetched earlier)
+    existing_secrets = ctx.existing_github_secrets
+    if existing_secrets is None:
+        # This path should ideally not be reached anymore if secrets are fetched in setup_project
+        log_func(f"⚠️ Internal Warning: Existing secrets were not pre-fetched. Check setup_project logic.")
+        logger.error(f"Internal Error: existing_github_secrets is None in _setup_github_secrets for {repo_name}. Should have been fetched earlier.")
+        existing_secrets = [] # Assume none to prevent crashing, but log error
 
-    # Check which secrets can be dynamically generated
-    dynamic_secrets = generate_dynamic_secrets(repo_name)
-    can_be_generated = [secret for secret in required_secrets if secret in dynamic_secrets]
+    # --- DEBUG LOG: Context ID --- #
+    logger.debug(f"Created context object with id: {id(ctx)}")
+    # --- END DEBUG LOG --- #
 
-    if can_be_generated:
-        log_func(f"   The following secrets will be generated automatically if not found in .env and don't exist in repository:")
-        for secret in can_be_generated:
+    # Log which secrets were generated during this run
+    if secrets_to_set_from_context:
+        log_func(f"   Secrets generated or specified during this setup: {', '.join(secrets_to_set_from_context.keys())}")
+
+    # Log which required secrets already exist in GitHub
+    if existing_secrets:
+        existing_required = [s for s in required_secrets if s in existing_secrets]
+        if existing_required:
+            log_func(f"   The following required secrets already exist in GitHub and will NOT be overwritten by generated values:")
+            for secret in existing_required:
+                log_func(f"   - {secret}")
+
+    # --- Prepare Final Secrets Dictionary (Prioritize generated, skip existing) ---
+    final_secrets_to_set = {}
+
+    # 1. Add secrets generated during this run (from context)
+    for name, value in secrets_to_set_from_context.items():
+        if name in required_secrets:
+            if name not in existing_secrets:
+                final_secrets_to_set[name] = value
+                logger.debug(f"Adding generated secret '{name}' to be set.")
+            else:
+                logger.debug(f"Skipping generated secret '{name}' as it already exists in GitHub.")
+        else:
+            logger.warning(f"Generated secret '{name}' is not listed as required by workflows. It will not be set.")
+
+    # 2. Check for required secrets missing from both generated and existing
+    missing_secrets = []
+    for secret_name in required_secrets:
+        if secret_name not in final_secrets_to_set and secret_name not in existing_secrets:
+            # Try to find the missing secret using the Config class as a fallback
+            try:
+                secret_value = Config.get(secret_name)
+                if secret_value:
+                    final_secrets_to_set[secret_name] = secret_value
+                    log_func(f"   Found missing required secret '{secret_name}' via Config.")
+                    logger.info(f"Found missing secret '{secret_name}' via Config for {repo_name}.")
+                else:
+                    # Config.get might return None or empty string if set but empty
+                    log_func(f"⚠️ Warning: Required secret '{secret_name}' found via Config but is empty. It will not be set.")
+                    logger.warning(f"Required secret '{secret_name}' from Config is empty for {repo_name}.")
+                    missing_secrets.append(secret_name) # Still considered missing if value is empty
+            except ConfigError:
+                # Config.get raises ConfigError if the variable is not found at all
+                log_func(f"⚠️ Warning: Required secret '{secret_name}' is not generated, not in GitHub, and not found via Config.")
+                logger.warning(f"Required secret '{secret_name}' not found via Config for {repo_name}.")
+                missing_secrets.append(secret_name)
+
+    # --- Set Secrets in GitHub --- #
+    if final_secrets_to_set:
+        log_func(f"   Attempting to set/update {len(final_secrets_to_set)} secrets in GitHub: {', '.join(final_secrets_to_set.keys())}")
+        try:
+            # Assuming setup_cicd is the function to actually set the secrets
+            # It should ideally take the repo_name and the dictionary of secrets
+            setup_cicd(repo_name=repo_name, secrets=final_secrets_to_set, ctx=ctx)
+            log_func(f"✅ GitHub secrets configuration attempted for {len(final_secrets_to_set)} secrets.")
+            logger.info(f"Called setup_cicd for {len(final_secrets_to_set)} secrets in {repo_name}.")
+        except Exception as e:
+            log_func(f"❌ Error setting GitHub secrets: {str(e)}")
+            logger.error(f"Failed to set GitHub secrets for {repo_name}: {e}", exc_info=True)
+            # Log which secrets failed if possible
+            log_func(f"   Failed secrets: {', '.join(final_secrets_to_set.keys())}")
+            # Decide if this should be a critical error or just a warning
+    else:
+        log_func("ℹ️ No new or missing secrets need to be set in GitHub.")
+        logger.info(f"No secrets needed setting via setup_cicd for {repo_name}.")
+
+    # --- Final Warnings for Missing Secrets --- #
+    if missing_secrets:
+        log_func(f"⚠️ Warning: The following required secrets are still missing and must be set manually in GitHub:")
+        for secret in missing_secrets:
             log_func(f"   - {secret}")
 
-    # Check which secrets already exist in the repository
-    try:
-        existing_secrets = get_repository_secrets(repo_name)
-        if existing_secrets:
-            existing_required = [s for s in required_secrets if s in existing_secrets]
-            if existing_required:
-                log_func(f"   The following secrets already exist and will be skipped:")
-                for secret in existing_required:
-                    log_func(f"   - {secret}")
-    except Exception as e:
-        log_func(f"   Warning: Could not check existing secrets: {str(e)}")
 
-    # Set up secrets in GitHub repository
-    try:
-        setup_cicd(repo_name, required_secret_names=list(required_secrets))
-        log_func(f"✅ GitHub secrets configured from .env file and dynamic generation")
-    except Exception as e:
-        log_func(f"⚠️  Warning: Could not set up all GitHub secrets: {str(e)}")
-        log_func(f"   You may need to set up missing secrets manually.")
-
-
-def _setup_cicd_variables(name: str, log_func: Callable) -> None:
+def _setup_cicd_variables(ctx: ProjectSetupContext) -> None:
     """
     Step 4: Set up CI/CD variables for the project.
 
-    Args:
-        name: Project name
-        log_func: Function to use for logging
+    :param ctx: The project setup context, including project name, directory, and db_info.
+    :type ctx: ProjectSetupContext
     """
+    log_func = ctx.log_func # Get log_func from context
     log_func("🔄 Setting up CI/CD variables...")
-    # from infra.providers.git import setup_cicd
-    # setup_cicd(name)
-    log_func("✅ CI/CD variables set up")
-
-
-def _create_database(name: str, db_type: str, db_name: Optional[str], log_func: Callable, use_yandex_cloud: bool = False, use_local_docker: bool = True) -> str:
-    """
-    Step 5: Create a database for the project.
-
-    For Yandex Cloud: This step is skipped if DATABASE_URL secret already exists in GitHub.
-    For local Docker: This step is skipped if DATABASE_URL exists in the .env file of the project.
-
-    The function creates a database either in Yandex Cloud or locally in Docker.
-
-    Args:
-        name: Project name
-        db_type: Database type
-        db_name: Database name (defaults to project name)
-        log_func: Function to use for logging
-        use_yandex_cloud: Whether to use Yandex Cloud for database creation
-        use_local_docker: Whether to create a local Docker database
-
-    Returns:
-        The name of the created database
-    """
-    db_name = db_name or name
-    log_func("🔄 Checking if database needs to be created...")
-
-    try:
-        # Determine which method to use for database creation
-        if use_yandex_cloud:
-            _create_yandex_cloud_database(name, db_type, db_name, log_func)
-        elif use_local_docker:
-            _create_docker_database(name, db_type, db_name, log_func)
-        else:
-            log_func("ℹ️ Skipping database creation as both Yandex Cloud and local Docker are disabled")
-
-    except Exception as e:
-        logger.error(f"Failed to create database: {str(e)}")
-        log_func(f"⚠️  Database creation failed: {str(e)}")
-        log_func(f"   Continuing with project setup...")
-
-    return db_name
-
-
-def _create_yandex_cloud_database(name: str, db_type: str, db_name: str, log_func: Callable) -> None:
-    """
-    Create a database in Yandex Cloud.
-
-    Args:
-        name: Project name
-        db_type: Database type
-        db_name: Database name
-        log_func: Function to use for logging
-    """
-    # Check if DATABASE_URL secret already exists in GitHub
-    from infra.providers.git.github import get_repository_secrets
-
-    # Get existing secrets
-    existing_secrets = get_repository_secrets(name)
-
-    if "DATABASE_URL" in existing_secrets:
-        log_func(f"ℹ️ DATABASE_URL secret already exists for project {name}")
-        log_func(f"   Skipping Yandex Cloud database creation to preserve existing configuration")
-        return
-
-    log_func("🔄 Creating database in Yandex Cloud...")
-    from infra.providers.cloud.yandex.db.postgres import create_database
-    from infra.config import Config
-
-    # Create database in Yandex Cloud PostgreSQL
-    db_info = create_database(db_name, db_type)
-
-    # Save database info for later use by other operations
-    Config.save_database_info(name, db_info)
-
-    log_func(f"✅ Database '{db_name}' created in Yandex Cloud")
-    log_func(f"   Host: {db_info['host']}")
-    log_func(f"   Username: {db_info['username']}")
-
-    # Add a note about DATABASE_URL being added to GitHub secrets
-    log_func(f"   DATABASE_URL will be added to GitHub secrets")
-
-
-def _create_docker_database(name: str, db_type: str, db_name: str, log_func: Callable) -> None:
-    """
-    Create a local database using Docker.
-
-    Args:
-        name: Project name
-        db_type: Database type
-        db_name: Database name
-        log_func: Function to use for logging
-    """
-    import random
-    import socket
-    import subprocess
-    from pathlib import Path
-    from infra.config import Config
-    from infra.providers.local.env import get_project_env
-
-    # Get the project's environment
-    project_env = get_project_env(name)
-
-    # Check if .env file already has DATABASE_URL
-    if project_env.has_var("DATABASE_URL"):
-        log_func(f"ℹ️ DATABASE_URL already exists in .env file for project {name}")
-        log_func(f"   Skipping local Docker database creation to preserve existing configuration")
-        return
-
-    log_func("🔄 Creating local database in Docker...")
-
-    # Generate random credentials
-    username = f"user_{name.replace('-', '_')}"
-    password = ''.join(random.choices('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=16))
-
-    # Find available port
-    def is_port_available(port):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            return s.connect_ex(('localhost', port)) != 0
-
-    port = random.randint(32000, 65000)
-    attempts = 0
-    while not is_port_available(port) and attempts < 10:
-        port = random.randint(32000, 65000)
-        attempts += 1
-
-    if attempts >= 10:
-        raise Exception("Could not find available port for Docker database")
-
-    # Start Docker container
-    log_func(f"   Starting Docker container with PostgreSQL on port {port}...")
-    container_name = f"postgres_{name.replace('-', '_')}"
-
-    try:
-        # Check if container already exists
-        check_result = subprocess.run(
-            ["docker", "ps", "-a", "--filter", f"name={container_name}", "--format", "{{.Names}}"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-
-        if container_name in check_result.stdout:
-            log_func(f"   Container {container_name} already exists, removing it...")
-            subprocess.run(
-                ["docker", "rm", "-f", container_name],
-                check=True,
-                capture_output=True
-            )
-
-        # Create and start the container
-        subprocess.run(
-            [
-                "docker", "run", "--name", container_name,
-                "-e", f"POSTGRES_USER={username}",
-                "-e", f"POSTGRES_PASSWORD={password}",
-                "-e", f"POSTGRES_DB={db_name}",
-                "-p", f"{port}:5432",
-                "-d", "postgres"
-            ],
-            check=True,
-            capture_output=True
-        )
-
-        # Create DATABASE_URL
-        database_url = f"postgresql://{username}:{password}@localhost:{port}/{db_name}"
-
-        # Save database info for later use by other operations
-        db_info = {
-            "host": "localhost",
-            "port": port,
-            "database": db_name,
-            "username": username,
-            "password": password,
-            "url": database_url,
-            "container_name": container_name
-        }
-        Config.save_database_info(name, db_info)
-
-        # Create or update .env file with DATABASE_URL
-        log_func(f"   Adding DATABASE_URL to .env file...")
-        project_env.set_var("DATABASE_URL", database_url)
-
-        log_func(f"✅ Database '{db_name}' created in Docker container {container_name}")
-        log_func(f"   Container: {container_name}")
-        log_func(f"   Port: {port}")
-        log_func(f"   Username: {username}")
-        log_func(f"   DATABASE_URL added to .env file")
-
-    except subprocess.CalledProcessError as e:
-        stderr_msg = e.stderr.decode() if hasattr(e.stderr, 'decode') else e.stderr
-        raise Exception(f"Docker command failed: {stderr_msg if stderr_msg else str(e)}")
+    # Placeholder: Add logic here to set up GitHub Actions variables if needed.
+    # This might involve using ctx.name, ctx.project_dir, or other context info.
+    # Example: repo.create_variable("MY_VARIABLE", "my_value")
+    log_func("✅ CI/CD variables setup step completed (Placeholder)")
 
 
 def _setup_container_infrastructure(name: str, log_func: Callable, use_yandex_cloud: bool = False) -> None:
     """
     Step 6: Set up container infrastructure for the project.
 
-    Args:
-        name: Project name
-        log_func: Function to use for logging
-        use_yandex_cloud: Whether to use Yandex Cloud for container setup
+    :param name: Project name
+    :type name: str
+    :param log_func: Function to use for logging
+    :type log_func: Callable
+    :param use_yandex_cloud: Whether to use Yandex Cloud for container setup, defaults to False
+    :type use_yandex_cloud: bool, optional
     """
     if not use_yandex_cloud:
-        log_func("ℹ️ Skipping container infrastructure setup as Yandex Cloud operations are disabled")
+        log_func("ℹ️  Skipping container infrastructure setup as Yandex Cloud operations are disabled")
         return
 
-    log_func("🔄 Setting up container infrastructure...")
+    # log_func("🔄 Setting up container infrastructure...")
     # from infra.providers.cloud.yandex.compute import setup_containers
     # setup_containers(name)
-    log_func("✅ Container infrastructure configured")
+    # log_func("✅ Container infrastructure configured")
 
 
 def _finalize_project_setup(
-    name: str,
-    technologies: List[str],
+    ctx: ProjectSetupContext, # Accept context object
     repo_url: str,
-    project_dir: Path,
-    db_name: str,
-    log_func: Callable
+    final_db_name: str
 ) -> Dict[str, Any]:
     """
-    Step 7: Finalize project setup and return result.
+    Step 9: Finalize project setup and return result using context.
 
-    Args:
-        name: Project name
-        technologies: List of technologies
-        repo_url: Repository URL
-        project_dir: Project directory path
-        db_name: Database name
-        log_func: Function to use for logging
-
-    Returns:
-        Dictionary with setup results
+    :param ctx: The project setup context.
+    :type ctx: ProjectSetupContext
+    :param repo_url: Repository URL
+    :type repo_url: str
+    :param final_db_name: Final database name used.
+    :type final_db_name: str
+    :return: Dictionary with setup results
+    :rtype: Dict[str, Any]
     """
+    log_func = ctx.log_func # Get log_func from context
     log_func("🔄 Finalizing project setup...")
 
-    log_func(f"\n✅ Local project directory: {project_dir}")
+    log_func(f"\n✅ Local project directory: {ctx.project_dir}")
     log_func(f"✅ GitHub repository: {repo_url}")
-    log_func(f"✅ Project has been set up with: {', '.join(technologies)}")
+    log_func(f"✅ Project has been set up with: {', '.join(ctx.technologies)}")
 
-    log_func(f"\n🚀 Project {name} is ready for development! 🚀")
+    log_func(f"\n🚀 Project {ctx.name} is ready for development! 🚀")
 
     return {
-        "project_name": name,
-        "technologies": technologies,
+        "project_name": ctx.name,
+        "technologies": ctx.technologies,
         "repository_url": repo_url,
-        "project_directory": str(project_dir),
-        "database_name": db_name
+        "project_directory": str(ctx.project_dir),
+        "database_name": final_db_name
     }

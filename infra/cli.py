@@ -226,7 +226,8 @@ def setup_project(
             db_name=db_name,
             template_name=template_name,
             use_yandex_cloud=yandex,
-            log_callback=click.echo
+            log_callback=click.echo,
+            debug=debug
         )
     except SetupError as e:
         click.echo(f"❌ {str(e)}", err=True)
