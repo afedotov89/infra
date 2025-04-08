@@ -53,6 +53,7 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
     project_name = ctx.name
     ctx.github_secrets['YC_API_GATEWAY_NAME'] = f"{project_name}-api-gateway"
     ctx.github_secrets['YC_BUCKET_NAME'] = project_name
+    ctx.github_secrets['YC_STATIC_BUCKET_NAME'] = f"{project_name}-static"
     ctx.github_secrets['YC_CONTAINER_NAME'] = f"{project_name}-backend"
     ctx.github_secrets['CORS_ALLOWED_ORIGINS'] = f"https://{project_name}.website.yandexcloud.net"
 
