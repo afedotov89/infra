@@ -127,7 +127,6 @@ jobs:
           yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
           bucket: ${{ secrets.YC_BUCKET_NAME }}
           root: ./frontend/out
-          clear: true
           include: "**/*"  # Рекурсивно включаем все файлы и поддиректории
           # Настраиваем кэширование для различных типов файлов
           cache-control: |
