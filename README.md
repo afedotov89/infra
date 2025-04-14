@@ -79,8 +79,8 @@ The CLI is organized into logical command groups:
 # List available templates
 infra list templates
 
-# Complete project setup with selected template
-infra setup project --name myproject --template webapp --private --db-type postgres
+# Setup project with Yandex Cloud integration
+infra setup project --name myproject --template webapp --private --yandex
 
 # Repository creation (two equivalent ways)
 infra create repo --name myproject --private
