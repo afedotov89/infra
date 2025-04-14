@@ -33,25 +33,25 @@ jobs:
         id: get_container_ids
         env:
           YC_BACKEND_CONTAINER_NAME: ${{ secrets.YC_CONTAINER_NAME }}
-          YC_FRONTEND_CONTAINER_NAME: ${{ secrets.YC_FRONTEND_CONTAINER_NAME }}
+          # YC_FRONTEND_CONTAINER_NAME: ${{ secrets.YC_FRONTEND_CONTAINER_NAME }}
         run: |
           echo "Fetching container IDs..."
           BACKEND_ID=$($HOME/yandex-cloud/bin/yc serverless container get "${YC_BACKEND_CONTAINER_NAME}" --format json | jq -r '.id')
-          FRONTEND_ID=$($HOME/yandex-cloud/bin/yc serverless container get "${YC_FRONTEND_CONTAINER_NAME}" --format json | jq -r '.id')
+          # FRONTEND_ID=$($HOME/yandex-cloud/bin/yc serverless container get "${YC_FRONTEND_CONTAINER_NAME}" --format json | jq -r '.id')
 
           if [ -z "$BACKEND_ID" ] || [ "$BACKEND_ID" == "null" ]; then
             echo "::error::Failed to get Backend Container ID for name ${YC_BACKEND_CONTAINER_NAME}"
             exit 1
           fi
-          if [ -z "$FRONTEND_ID" ] || [ "$FRONTEND_ID" == "null" ]; then
-            echo "::error::Failed to get Frontend Container ID for name ${YC_FRONTEND_CONTAINER_NAME}"
-            exit 1
-          fi
+          # if [ -z "$FRONTEND_ID" ] || [ "$FRONTEND_ID" == "null" ]; then
+          #   echo "::error::Failed to get Frontend Container ID for name ${YC_FRONTEND_CONTAINER_NAME}"
+          #   exit 1
+          # fi
 
           echo "Backend Container ID: ${BACKEND_ID}"
-          echo "Frontend Container ID: ${FRONTEND_ID}"
+          # echo "Frontend Container ID: ${FRONTEND_ID}"
           echo "::set-output name=backend_id::${BACKEND_ID}"
-          echo "::set-output name=frontend_id::${FRONTEND_ID}"
+          # echo "::set-output name=frontend_id::${FRONTEND_ID}"
 
       - name: Update API Gateway from Template
         env:
@@ -61,10 +61,10 @@ jobs:
           YC_FOLDER_ID: ${{ secrets.YC_FOLDER_ID }}
           # Контейнеры (ID получаем из предыдущего шага)
           YC_BACKEND_CONTAINER_ID: ${{ steps.get_container_ids.outputs.backend_id }}
-          YC_FRONTEND_CONTAINER_ID: ${{ steps.get_container_ids.outputs.frontend_id }}
+          # YC_FRONTEND_CONTAINER_ID: ${{ steps.get_container_ids.outputs.frontend_id }}
           # Бакеты для статики
           YC_BACKEND_STATIC_BUCKET_NAME: ${{ secrets.YC_STATIC_BUCKET_NAME }}
-          YC_FRONTEND_STATIC_BUCKET_NAME: ${{ secrets.YC_BUCKET_NAME }}
+          # YC_FRONTEND_STATIC_BUCKET_NAME: ${{ secrets.YC_BUCKET_NAME }}
           # Сервисный аккаунт
           YC_SERVICE_ACCOUNT_ID: ${{ secrets.YC_SERVICE_ACCOUNT_ID }}
           # --------------------------------------------------------
