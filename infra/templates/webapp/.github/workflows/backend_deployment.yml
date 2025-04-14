@@ -123,6 +123,14 @@ jobs:
           if ! command -v yc &> /dev/null; then curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash; echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH; fi
           if ! $HOME/yandex-cloud/bin/yc config profile get sa-profile &> /dev/null; then echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > sa-key.json; $HOME/yandex-cloud/bin/yc config profile create sa-profile; $HOME/yandex-cloud/bin/yc config set service-account-key sa-key.json; $HOME/yandex-cloud/bin/yc config set folder-id ${{ secrets.YC_FOLDER_ID }}; fi
 
+          # Проверяем существование контейнера и создаем его, если не существует
+          if ! $HOME/yandex-cloud/bin/yc serverless container get "${YC_CONTAINER_NAME}" &> /dev/null; then
+            echo "Container ${YC_CONTAINER_NAME} not found. Creating it..."
+            $HOME/yandex-cloud/bin/yc serverless container create \
+              --name "${YC_CONTAINER_NAME}" \
+              --folder-id "${YC_FOLDER_ID}"
+          fi
+
           # Создаем или обновляем контейнер
           $HOME/yandex-cloud/bin/yc serverless container revisions deploy \
             --container-name "${YC_CONTAINER_NAME}" \
