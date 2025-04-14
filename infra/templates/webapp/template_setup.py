@@ -11,9 +11,13 @@ import string
 from infra.project_setup.environment import (
     setup_python_environment,
     setup_database,
-    setup_frontend_environment
+    setup_frontend_environment,
+    setup_bucket
 )
 from infra.project_setup.types import ProjectSetupContext
+import subprocess
+
+from infra.providers.local.env import ProjectEnv
 
 
 logger = logging.getLogger(__name__)
@@ -52,7 +56,6 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
     # Set Yandex Cloud infrastructure names based on project name
     project_name = ctx.name
     ctx.github_secrets['YC_API_GATEWAY_NAME'] = f"{project_name}-api-gateway"
-    ctx.github_secrets['YC_BUCKET_NAME'] = project_name
     ctx.github_secrets['YC_STATIC_BUCKET_NAME'] = f"{project_name}-static"
     ctx.github_secrets['YC_CONTAINER_NAME'] = f"{project_name}-backend"
     ctx.github_secrets['ALLOWED_HOSTS'] = f"{project_name}.website.yandexcloud.net"
@@ -60,8 +63,9 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
     ctx.github_secrets['SITE_URL'] = f"https://{project_name}.website.yandexcloud.net"
 
     # Add local development variables to project_env
-    ctx.project_env['CORS_ALLOWED_ORIGINS'] = "http://localhost:3000"
-    ctx.project_env['SITE_URL'] = "http://localhost:8000"
+    local_env = ProjectEnv(Path(ctx.project_dir) / 'backend' / '.env')
+    local_env.set_var('CORS_ALLOWED_ORIGINS', "http://localhost:3000")
+    local_env.set_var('SITE_URL', "http://localhost:8000")
 
     # Generate Django Secret Key
     alphabet = string.ascii_letters + string.digits + string.punctuation
@@ -77,6 +81,7 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
     # Create a context specific to the backend setup
     backend_ctx = copy.deepcopy(ctx)
     backend_ctx.project_dir = str(backend_dir) # Update project_dir
+    backend_ctx.project_env = local_env.read()
     logger.debug(f"Created backend-specific context with project_dir: {backend_ctx.project_dir}")
 
     # 1. Set up Backend Python virtual environment using the backend context
@@ -89,8 +94,9 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
 
     if 'DATABASE_URL' in backend_ctx.github_secrets:
         ctx.github_secrets['DATABASE_URL'] = backend_ctx.github_secrets['DATABASE_URL']
-    if 'DATABASE_URL' in backend_ctx.project_env:
-        ctx.project_env['DATABASE_URL'] = backend_ctx.project_env['DATABASE_URL']
+
+    for k, v in backend_ctx.project_env.items():
+        local_env.set_var(k, v)
 
     logger.debug("Backend setup finished.")
 
@@ -100,7 +106,13 @@ def _setup_frontend(ctx: 'ProjectSetupContext'):
     logger.debug("Starting frontend setup.")
     project_name = ctx.name
     ctx.github_secrets['YC_FRONTEND_CONTAINER_NAME'] = f"{project_name}-frontend"
+    ctx.github_secrets['YC_BUCKET_NAME'] = project_name
     ctx.github_secrets['DOMAIN_NAME'] = f"{project_name}.website.yandexcloud.net"
+
+    # Create Yandex Cloud bucket for static files using environment module
+    bucket_name = f"{project_name}-static"
+    result = setup_bucket(ctx, bucket_name)
+    logger.info(f"Bucket creation attempt for {bucket_name}: {'successful' if result else 'failed or bucket already exists'}.")
 
     # Generate NextAuth Secret
     alphabet = string.ascii_letters + string.digits + string.punctuation

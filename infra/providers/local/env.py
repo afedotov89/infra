@@ -197,6 +197,8 @@ class ProjectEnv:
             raise EnvFileError(f"Failed to write .env file: {str(e)}")
 
 
+
+
 # Backward compatibility functions
 def read_env_file(env_file_path: Path) -> Dict[str, str]:
     """Legacy function for backwards compatibility."""

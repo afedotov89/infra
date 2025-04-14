@@ -25,51 +25,51 @@ class TemplateError(Exception):
 def list_available_templates() -> List[str]:
     """
     List available project templates.
-    
+
     Returns:
         List[str]: List of template names
     """
     # Get templates from physical directories
     base_dir = Path(__file__).parent
     logger.debug(f"Templates base directory: {base_dir}")
-    
+
     # Find all directories that don't start with underscore
-    physical_templates = [d.name for d in base_dir.iterdir() 
+    physical_templates = [d.name for d in base_dir.iterdir()
                          if d.is_dir() and not d.name.startswith('__')]
     logger.debug(f"Template directories found: {physical_templates}")
-    
+
     # Use only physically present templates
     templates = physical_templates
-        
-    logger.debug(f"Available templates: {templates}")        
+
+    logger.debug(f"Available templates: {templates}")
     return templates
 
 
 def _get_template_path(template_name: str) -> Path:
     """
     Get the path to a template directory.
-    
+
     Args:
         template_name: Name of the template
-        
+
     Returns:
         Path: Path to the template directory
-        
+
     Raises:
         TemplateError: If template does not exist
     """
     # Base directory for templates
     base_dir = Path(__file__).parent
     logger.debug(f"Looking for template '{template_name}' in base directory: {base_dir}")
-    
+
     # Check if template directory exists
     template_dir = base_dir / template_name
     logger.debug(f"Template directory path: {template_dir}, exists: {template_dir.exists()}")
-    
+
     if template_dir.exists():
         logger.debug(f"Template found at: {template_dir}")
         return template_dir
-        
+
     # If not, raise an error
     logger.error(f"Template '{template_name}' not found at: {template_dir}")
     raise TemplateError(f"Template '{template_name}' not found")
@@ -78,23 +78,23 @@ def _get_template_path(template_name: str) -> Path:
 def _initialize_git_repo(project_dir: Path) -> None:
     """
     Initialize a new Git repository in the project directory.
-    
+
     Args:
         project_dir: Project directory
-        
+
     Raises:
         TemplateError: If Git initialization fails
     """
     try:
         logger.info(f"Initializing Git repository in {project_dir}")
         repo = Repo.init(project_dir)
-        
+
         # Add all files to Git
         repo.git.add(A=True)
-        
+
         # Initial commit
         repo.git.commit(m="Initial commit from Infra template")
-        
+
         logger.info("Git repository initialized with initial commit")
     except Exception as e:
         logger.error(f"Failed to initialize Git repository: {str(e)}")
@@ -111,7 +111,7 @@ def generate_boilerplate(
 ) -> Path:
     """
     Generate a project boilerplate from a template.
-    
+
     Args:
         project_name: Name of the project
         template_name: Name of the template to use
@@ -119,32 +119,32 @@ def generate_boilerplate(
         context: Additional context variables for the template
         initialize_git: Whether to initialize a Git repository
         force_existing_dir: If True, will use the existing directory even if it already exists
-        
+
     Returns:
         Path: Path to the generated project
-        
+
     Raises:
         TemplateError: If boilerplate generation fails
     """
     if template_name not in list_available_templates():
         raise TemplateError(f"Unknown template: {template_name}")
-    
+
     # Set up directories
     if output_dir is None:
         output_dir = Path.cwd()
     elif isinstance(output_dir, str):
         output_dir = Path(output_dir)
-        
+
     project_dir = output_dir / project_name
-    
+
     try:
         # Check if project directory already exists
         if project_dir.exists() and not force_existing_dir:
             logger.warning(f"Project directory {project_dir} already exists")
             raise TemplateError(f"Project directory {project_dir} already exists")
-            
+
         logger.info(f"Generating {template_name} boilerplate for {project_name}")
-        
+
         # Merge default context with provided context
         template_context = {
             "project_name": project_name,
@@ -152,11 +152,11 @@ def generate_boilerplate(
         }
         if context:
             template_context.update(context)
-            
+
         # Get local template path
         logger.info(f"Using local template for {template_name}")
         template_dir = _get_template_path(template_name)
-        
+
         # Copy template to project directory
         if force_existing_dir and project_dir.exists():
             # Just copy all files directly
@@ -167,14 +167,14 @@ def generate_boilerplate(
             # Create a new directory with the template
             logger.debug(f"Creating new directory: {project_dir}")
             shutil.copytree(template_dir, project_dir)
-        
+
         # Initialize Git repository if requested
         if initialize_git:
             _initialize_git_repo(project_dir)
-            
+
         logger.info(f"Boilerplate generated successfully at {project_dir}")
         return project_dir
-        
+
     except TemplateError:
         # Re-raise template errors without cleanup
         raise
@@ -189,4 +189,4 @@ def generate_boilerplate(
                 # If this was a "directory exists" error but we've now removed it,
                 # raise a different error that better explains what happened
                 raise TemplateError(f"Error during project creation. The directory was removed for retry.") from e
-        raise TemplateError(f"Failed to generate boilerplate: {str(e)}") from e 
+        raise TemplateError(f"Failed to generate boilerplate: {str(e)}") from e

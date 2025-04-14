@@ -129,7 +129,7 @@ def setup_python_environment(ctx: 'ProjectSetupContext') -> None:
     # 1. Check if venv already exists
     if venv_dir.exists():
         logger.info(f"Virtual environment already exists at {venv_dir}. Skipping creation.")
-        log_func("ℹ️  Virtual environment already exists.")
+        log_func("ℹ️ Virtual environment already exists.")
         # Optionally, you could add logic here to check if it's functional
         # or if dependencies need updating, but for now, just skip.
         return # Exit early if venv exists
@@ -161,7 +161,7 @@ def setup_python_environment(ctx: 'ProjectSetupContext') -> None:
             # Consider if this failure should halt the process
     else:
         logger.info("No requirements.txt found. Skipping dependency installation.")
-        log_func("   ℹ️  No requirements.txt found, skipping dependency installation.")
+        log_func("   ℹ️ No requirements.txt found, skipping dependency installation.")
 
     log_func("🐍 Python environment setup complete.")
     logger.info(f"Python environment setup finished for {project_dir}")
@@ -197,7 +197,7 @@ def _setup_yandex_cloud_database(ctx: 'ProjectSetupContext') -> None:
         log_func(f"⚠️ Warning: Could not check GitHub repository '{repo_name}' secrets (data not available).")
         # Fallback to checking if it was generated earlier *in this run*
         if 'DATABASE_URL' in ctx.github_secrets:
-            log_func(f"ℹ️  DATABASE_URL was generated earlier in this run. Skipping Yandex Cloud DB setup (GitHub check skipped).")
+            log_func(f"ℹ️ DATABASE_URL was generated earlier in this run. Skipping Yandex Cloud DB setup (GitHub check skipped).")
             logger.info(f"DATABASE_URL found in ctx.github_secrets for {repo_name} (GitHub check skipped). Skipping YC DB setup.")
             return
         else:
@@ -205,13 +205,13 @@ def _setup_yandex_cloud_database(ctx: 'ProjectSetupContext') -> None:
             logger.info(f"Proceeding with YC DB setup for {repo_name} (GitHub check skipped).")
 
     elif 'DATABASE_URL' in existing_secrets:
-        log_func(f"✅ DATABASE_URL secret already exists in GitHub repository '{repo_name}'. Skipping Yandex Cloud DB setup.")
+        log_func(f"ℹ️ DATABASE_URL secret already exists in GitHub repository '{repo_name}'. Skipping Yandex Cloud DB setup.")
         logger.info(f"DATABASE_URL secret found in pre-fetched GitHub secrets for {repo_name}. Skipping YC DB setup.")
         return # Skip the rest of the function
 
     # Check if it was generated earlier *in this run* (if not found in GitHub)
     elif 'DATABASE_URL' in ctx.github_secrets:
-        log_func(f"ℹ️  DATABASE_URL not in GitHub, but was generated earlier in this run. Skipping Yandex Cloud DB setup.")
+        log_func(f"ℹ️ DATABASE_URL not in GitHub, but was generated earlier in this run. Skipping Yandex Cloud DB setup.")
         logger.info(f"DATABASE_URL found in ctx.github_secrets for {repo_name} (not in GitHub). Skipping YC DB setup.")
         return # Skip the rest of the function
 
@@ -275,7 +275,7 @@ def _setup_docker_database(ctx: 'ProjectSetupContext') -> None:
     # 1. Check if DATABASE_URL is already known in the project environment context
     if 'DATABASE_URL' in ctx.project_env:
         existing_url = ctx.project_env['DATABASE_URL']
-        log_func(f"ℹ️  DATABASE_URL is already present in project context. Skipping Docker DB setup.")
+        log_func(f"ℹ️ DATABASE_URL is already present in project context. Skipping Docker DB setup.")
         log_func(f"   Existing URL: {existing_url[:existing_url.find('@')] + '@...' if '@' in existing_url else existing_url}") # Log obfuscated URL
         logger.info(f"DATABASE_URL found in ctx.project_env for {project_name}. Skipping Docker DB setup.")
         return
@@ -285,9 +285,6 @@ def _setup_docker_database(ctx: 'ProjectSetupContext') -> None:
 
     # Setup ProjectEnv helper for interacting with the .env file
     env_dir = Path(ctx.project_dir)
-    env_file_path = env_dir / '.env'
-    project_env = ProjectEnv(env_file_path)
-    logger.debug(f"Using environment file for Docker setup: {env_file_path}")
 
     # --- Docker Setup Logic (Port finding, container management) ---
 
@@ -357,15 +354,11 @@ def _setup_docker_database(ctx: 'ProjectSetupContext') -> None:
         ctx.project_env['DATABASE_URL'] = database_url
         logger.info(f"Stored DATABASE_URL in ctx.project_env for project {project_name}")
 
-        # Update .env file using the helper
-        log_func(f"   Adding DATABASE_URL to '{env_file_path}'...")
-        project_env.set_var("DATABASE_URL", database_url)
-
         log_func(f"✅ Database '{db_name}' created in Docker container '{container_name}'")
         log_func(f"   Container: {container_name}")
         log_func(f"   Port: {port}")
         log_func(f"   Username: {username}")
-        log_func(f"   DATABASE_URL added to '{env_file_path}'")
+        log_func(f"   DATABASE_URL added to project environment")
 
     except subprocess.CalledProcessError as e:
         # Error logging already done by _run_command
@@ -401,7 +394,7 @@ def setup_database(ctx: 'ProjectSetupContext') -> str:
             # Pass ctx directly to the helper function
             _setup_docker_database(ctx)
         # else:
-        #     log_func("ℹ️  Skipping database creation as both Yandex Cloud and local Docker are disabled")
+        #     log_func("ℹ️ Skipping database creation as both Yandex Cloud and local Docker are disabled")
 
     except Exception as e:
         logger.error(f"Failed to setup database: {str(e)}", exc_info=True)
@@ -433,13 +426,13 @@ def setup_frontend_environment(ctx: 'ProjectSetupContext') -> None:
 
     if not package_json_path.exists():
         logger.info(f"No {package_json_path} found in {frontend_dir}. Skipping frontend dependency setup.")
-        log_func(f"   ℹ️  No package.json found in '{frontend_dir}'. Skipping frontend setup.")
+        log_func(f"   ℹ️ No package.json found in '{frontend_dir}'. Skipping frontend setup.")
         return
 
     # Check if node_modules already exists and is populated
     if node_modules_path.exists() and any(node_modules_path.iterdir()):
         logger.info(f"'{node_modules_path}' already exists and is not empty. Skipping installation.")
-        log_func(f"ℹ️  Frontend dependencies already installed in '{frontend_dir}', skipping.")
+        log_func(f"ℹ️ Frontend dependencies already installed in '{frontend_dir}', skipping.")
         return
 
     manager = ""
@@ -482,3 +475,26 @@ def setup_frontend_environment(ctx: 'ProjectSetupContext') -> None:
 
     log_func(f"✅ Frontend setup finished for '{relative_frontend_dir}'.")
     logger.debug(f"Frontend setup finished for {frontend_dir}")
+
+
+def setup_bucket(ctx: 'ProjectSetupContext', bucket_name: str) -> bool:
+    """
+    Creates a bucket in Yandex Cloud for static files if it doesn't already exist.
+    Args:
+        ctx: The project setup context.
+        bucket_name: The name of the bucket to create.
+
+    Returns:
+        bool: True if bucket creation was successful or bucket already exists, False otherwise.
+    """
+    from infra.providers.cloud.yandex.storage.bucket import create_bucket, check_bucket_exists
+    log_func = ctx.log_func
+    log_func(f"🔄 Checking if bucket '{bucket_name}' already exists...")
+    if check_bucket_exists(bucket_name):
+        log_func(f"ℹ️ Bucket '{bucket_name}' already exists. Skipping creation.")
+        logger.info(f"Bucket {bucket_name} already exists. Skipping creation.")
+        return True
+    log_func(f"   Bucket '{bucket_name}' does not exist. Proceeding with creation...")
+    logger.info(f"Bucket {bucket_name} does not exist. Creating new bucket.")
+    create_bucket(ctx, bucket_name)
+    log_func(f"✅ Bucket '{bucket_name}' created successfully.")

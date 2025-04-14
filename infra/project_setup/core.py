@@ -34,6 +34,7 @@ from infra.project_setup.environment import (
     setup_frontend_environment,
 )
 from infra.project_setup.types import ProjectSetupContext
+from infra.providers.local.env import ProjectEnv
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def _setup_project_specific_environment(ctx: ProjectSetupContext) -> str:
                 # Call the setup function from the template's script
                 final_db_name = template_module.setup(ctx)
                 logger.info(f"Template setup script executed successfully. Final DB name: {final_db_name}")
-                ctx.log_func(f"ℹ️  Template-specific environment setup complete.")
+                ctx.log_func(f"ℹ️ Template-specific environment setup complete.")
             else:
                 logger.warning(f"template_setup.py found but 'setup' function is missing.")
                 ctx.log_func(f"⚠️ Template setup script found but 'setup' function is missing.")
@@ -92,11 +93,87 @@ def _setup_project_specific_environment(ctx: ProjectSetupContext) -> str:
                 del sys.modules[module_name]
     else:
         logger.info("No template_setup.py found. Skipping template-specific environment setup.")
-        ctx.log_func("ℹ️  No template-specific setup script (template_setup.py) found.")
+        ctx.log_func("ℹ️ No template-specific setup script (template_setup.py) found.")
         # Optionally, run default logic here if needed for templates without the script
         # For now, we assume the script handles everything or nothing is needed.
 
     return final_db_name
+
+
+def _initialize_setup_context(
+    name: str,
+    technologies: List[str],
+    db_type: str,
+    db_name: Optional[str],
+    use_yandex_cloud: bool,
+    use_local_docker: bool,
+    project_dir: Path,
+    log_func: Callable
+) -> ProjectSetupContext:
+    """
+    Initialize the project setup context and fetch existing GitHub secrets.
+
+    :param name: Project name
+    :type name: str
+    :param technologies: List of technologies included in the project
+    :type technologies: List[str]
+    :param db_type: Database type
+    :type db_type: str
+    :param db_name: Database name
+    :type db_name: Optional[str]
+    :param use_yandex_cloud: Whether to use Yandex Cloud
+    :type use_yandex_cloud: bool
+    :param use_local_docker: Whether to use local Docker
+    :type use_local_docker: bool
+    :param project_dir: Path to the project directory
+    :type project_dir: Path
+    :param log_func: Function to use for logging
+    :type log_func: Callable
+    :return: Initialized project setup context
+    :rtype: ProjectSetupContext
+    """
+    logger.debug("Step 3.5 & 4: Setting up project-specific environment")
+    # Create context object
+    setup_ctx = ProjectSetupContext(
+        name=name,
+        technologies=technologies,
+        db_type=db_type,
+        db_name=db_name,
+        use_yandex_cloud=use_yandex_cloud,
+        use_local_docker=use_local_docker,
+        project_dir=project_dir,
+        log_func=log_func
+    )
+
+    # --- DEBUG LOG: Context ID --- #
+    logger.debug(f"Created context object with id: {id(setup_ctx)}")
+    # --- END DEBUG LOG --- #
+
+    # --- Fetch Existing GitHub Secrets (Early) --- #
+    log_func("🔄 Fetching existing secrets from GitHub...")
+    try:
+        # Store existing secret names in the context
+        setup_ctx.existing_github_secrets = get_repository_secrets(setup_ctx.name)
+        # --- DEBUG LOG: Inside Try --- #
+        logger.debug(f"Assigned existing secrets in setup_project (try block): {setup_ctx.existing_github_secrets} (type: {type(setup_ctx.existing_github_secrets)})")
+        # --- END DEBUG LOG --- #
+        logger.info(f"Successfully fetched existing secrets for {setup_ctx.name}: {setup_ctx.existing_github_secrets}")
+        log_func(f"   Found {len(setup_ctx.existing_github_secrets)} existing secrets.")
+    except Exception as e:
+        logger.warning(f"Could not fetch existing GitHub secrets for {setup_ctx.name}: {e}", exc_info=False)
+        log_func(f"⚠️ Warning: Could not fetch existing secrets from GitHub for '{setup_ctx.name}'. Assuming none exist.")
+        setup_ctx.existing_github_secrets = [] # Assume none if fetch fails
+        # --- DEBUG LOG: Inside Except --- #
+        logger.debug(f"Assigned existing secrets in setup_project (except block): {setup_ctx.existing_github_secrets} (type: {type(setup_ctx.existing_github_secrets)})")
+        # --- END DEBUG LOG --- #
+
+    env_dir = Path(setup_ctx.project_dir)
+    env_file_path = env_dir / '.env'
+    project_env = ProjectEnv(env_file_path)
+    setup_ctx.project_env = project_env.read()
+    logger.debug(f"Using environment file for Docker setup: {env_file_path}")
+
+    return setup_ctx
 
 
 def setup_project(
@@ -123,7 +200,8 @@ def setup_project(
     6. Sets up CI/CD variables
     7. Pushes code to GitHub
     8. Sets up container infrastructure (if use_yandex_cloud is True)
-    9. Finalizes project setup
+    9. Saves .env file from setup_ctx.project_env
+    10. Finalizes project setup
 
     :param name: Project name
     :type name: str
@@ -191,9 +269,7 @@ def setup_project(
         )
 
         # Step 3.5 & 4: Set up project-specific environment (Python venv, database)
-        logger.debug("Step 3.5 & 4: Setting up project-specific environment")
-        # Create context object
-        setup_ctx = ProjectSetupContext(
+        setup_ctx = _initialize_setup_context(
             name=name,
             technologies=technologies,
             db_type=db_type,
@@ -203,28 +279,6 @@ def setup_project(
             project_dir=project_dir,
             log_func=log
         )
-
-        # --- DEBUG LOG: Context ID --- #
-        logger.debug(f"Created context object with id: {id(setup_ctx)}")
-        # --- END DEBUG LOG --- #
-
-        # --- Fetch Existing GitHub Secrets (Early) --- #
-        log("🔄 Fetching existing secrets from GitHub...")
-        try:
-            # Store existing secret names in the context
-            setup_ctx.existing_github_secrets = get_repository_secrets(setup_ctx.name)
-            # --- DEBUG LOG: Inside Try --- #
-            logger.debug(f"Assigned existing secrets in setup_project (try block): {setup_ctx.existing_github_secrets} (type: {type(setup_ctx.existing_github_secrets)})")
-            # --- END DEBUG LOG --- #
-            logger.info(f"Successfully fetched existing secrets for {setup_ctx.name}: {setup_ctx.existing_github_secrets}")
-            log(f"   Found {len(setup_ctx.existing_github_secrets)} existing secrets.")
-        except Exception as e:
-            logger.warning(f"Could not fetch existing GitHub secrets for {setup_ctx.name}: {e}", exc_info=False)
-            log(f"⚠️ Warning: Could not fetch existing secrets from GitHub for '{setup_ctx.name}'. Assuming none exist.")
-            setup_ctx.existing_github_secrets = [] # Assume none if fetch fails
-            # --- DEBUG LOG: Inside Except --- #
-            logger.debug(f"Assigned existing secrets in setup_project (except block): {setup_ctx.existing_github_secrets} (type: {type(setup_ctx.existing_github_secrets)})")
-            # --- END DEBUG LOG --- #
 
         # Pass context object to the function
         # --- DEBUG LOG: Before _setup_project_specific_environment --- #
@@ -248,8 +302,12 @@ def setup_project(
         logger.debug("Step 8: Setting up container infrastructure")
         _setup_container_infrastructure(name, log, use_yandex_cloud)
 
-        # Step 9: Complete project setup
-        logger.debug("Step 9: Finalizing project setup")
+        # Step 9: Save .env file from setup_ctx.project_env
+        logger.debug("Step 9: Saving .env file from setup_ctx.project_env")
+        _save_env_file(setup_ctx)
+
+        # Step 10: Complete project setup
+        logger.debug("Step 10: Finalizing project setup")
         return _finalize_project_setup(
             ctx=setup_ctx, # Pass context
             repo_url=repo.html_url, # Pass repo URL
@@ -295,7 +353,7 @@ def _create_github_repository(name: str, private: bool, log_func: Callable) -> T
 
     if already_existed:
         logger.debug(f"Repository {name} already exists at {repo.html_url}")
-        log_func(f"ℹ️  Repository already exists: {repo.html_url}")
+        log_func(f"ℹ️ Repository already exists: {repo.html_url}")
         log_func(f"   Skipping repository creation step.")
     else:
         logger.debug(f"Successfully created new repository {name} at {repo.html_url}")
@@ -323,7 +381,7 @@ def _check_project_directory(name: str, log_func: Callable) -> Tuple[Path, bool,
 
     if dir_exists:
         logger.debug(f"Project directory exists: {project_dir}, empty: {is_empty}")
-        log_func(f"ℹ️  Project directory already exists: {project_dir}")
+        log_func(f"ℹ️ Project directory already exists: {project_dir}")
         if is_empty:
             log_func(f"   Directory is empty.")
         else:
@@ -394,7 +452,7 @@ def _create_local_project_files(
     else:
         directory_state = "empty" if is_empty else "non-empty"
         logger.debug(f"Using existing {directory_state} directory: {project_dir}")
-        log_func(f"ℹ️  Using existing {directory_state} directory: {project_dir}")
+        log_func(f"ℹ️ Using existing {directory_state} directory: {project_dir}")
 
     # Populate with template files if new directory or empty existing directory
     should_populate = not dir_exists or is_empty
@@ -406,7 +464,7 @@ def _create_local_project_files(
     # Initialize Git if needed
     if git_is_initialized:
         logger.debug(f"Git repository already initialized")
-        log_func(f"ℹ️  Git repository already initialized in project directory")
+        log_func(f"ℹ️ Git repository already initialized in project directory")
     else:
         _initialize_git_repository(project_dir, log_func)
 
@@ -633,7 +691,7 @@ def _setup_container_infrastructure(name: str, log_func: Callable, use_yandex_cl
     :type use_yandex_cloud: bool, optional
     """
     if not use_yandex_cloud:
-        log_func("ℹ️  Skipping container infrastructure setup as Yandex Cloud operations are disabled")
+        log_func("ℹ️ Skipping container infrastructure setup as Yandex Cloud operations are disabled")
         return
 
     # log_func("🔄 Setting up container infrastructure...")
@@ -662,9 +720,9 @@ def _finalize_project_setup(
     log_func = ctx.log_func # Get log_func from context
     log_func("🔄 Finalizing project setup...")
 
-    log_func(f"\n✅ Local project directory: {ctx.project_dir}")
-    log_func(f"✅ GitHub repository: {repo_url}")
-    log_func(f"✅ Project has been set up with: {', '.join(ctx.technologies)}")
+    log_func(f"\nℹ️ Local project directory: {ctx.project_dir}")
+    log_func(f"ℹ️ GitHub repository: {repo_url}")
+    log_func(f"ℹ️ Project has been set up with: {', '.join(ctx.technologies)}")
 
     log_func(f"\n🚀 Project {ctx.name} is ready for development! 🚀")
 
@@ -675,3 +733,25 @@ def _finalize_project_setup(
         "project_directory": str(ctx.project_dir),
         "database_name": final_db_name
     }
+
+def _save_env_file(ctx: ProjectSetupContext) -> None:
+    """
+    Save the environment variables from the setup context to the project's .env file.
+
+    :param ctx: The project setup context containing the project environment variables.
+    :type ctx: ProjectSetupContext
+    """
+    log_func = ctx.log_func
+    env_file_path = ctx.project_dir / '.env'
+
+    if ctx.project_env:
+        log_func("🔄 Saving environment variables to .env file...")
+        with open(env_file_path, 'w') as env_file:
+            for key, value in ctx.project_env.items():
+                if value is not None:
+                    env_file.write(f"{key}={value}\n")
+        log_func(f"✅ Environment variables saved to {env_file_path}")
+        logger.info(f"Saved environment variables to {env_file_path}")
+    else:
+        log_func("ℹ️ No environment variables to save.")
+        logger.info("No environment variables found in setup context to save.")
