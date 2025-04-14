@@ -365,7 +365,7 @@ jobs:
       #     # Переменные окружения для контейнера фронтенда
       #     ENV_VARS: |
       #       NODE_ENV=production
-      #       NEXTAUTH_URL=https://${{ secrets.YOUR_DOMAIN_NAME }}
+      #       NEXTAUTH_URL=https://${{ secrets.DOMAIN_NAME }}
       #       NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
       #       NEXT_PUBLIC_API_BASE_URL=https://${{ env.API_GW_DOMAIN }}
       #   run: |

@@ -24,31 +24,30 @@ class YandexCloudDBError(Exception):
 
 def generate_secure_password(length: int = 16) -> str:
     """
-    Generate a secure random password.
+    Generate a secure random password with only alphanumeric characters
+    to avoid issues with shell special characters.
 
     Args:
         length: Length of the password (default: 16)
 
     Returns:
-        A secure random password string
+        A secure random alphanumeric password string
     """
-    # Define character sets
+    # Define character sets - using only alphanumeric characters
     lowercase = string.ascii_lowercase
     uppercase = string.ascii_uppercase
     digits = string.digits
-    special_chars = "!#$%^&*()-_=+[]{}|;:,.<>?/"
 
     # Ensure at least one character from each set
     password = [
         random.choice(lowercase),
         random.choice(uppercase),
-        random.choice(digits),
-        random.choice(special_chars)
+        random.choice(digits)
     ]
 
     # Fill the rest of the password
     remaining_length = length - len(password)
-    all_chars = lowercase + uppercase + digits + special_chars
+    all_chars = lowercase + uppercase + digits
     password.extend(random.choice(all_chars) for _ in range(remaining_length))
 
     # Shuffle the password characters
@@ -118,7 +117,7 @@ def _create_database_and_user(db_name: str) -> Tuple[str, str, str]:
     # Get cluster host and info
     host, cluster_id = _get_cluster_host_and_id(yc_config)
 
-    # Generate a secure password for the user
+    # Generate a secure password for the user - only alphanumeric chars
     password = generate_secure_password()
 
     # Setup environment for yc commands
@@ -148,8 +147,8 @@ def _create_database_and_user(db_name: str) -> Tuple[str, str, str]:
             "--format", "json"
         ]
 
-        users_output = subprocess.check_output(list_users_cmd, env=env, stderr=subprocess.PIPE)
-        users = json.loads(users_output)
+        result = _run_yc_command(list_users_cmd, env)
+        users = json.loads(result.stdout)
 
         user_exists = any(user["name"] == db_name for user in users)
 
@@ -162,7 +161,7 @@ def _create_database_and_user(db_name: str) -> Tuple[str, str, str]:
                 "--cluster-id", cluster_id,
                 "--password", password
             ]
-            subprocess.check_call(update_user_cmd, env=env, stderr=subprocess.PIPE)
+            _run_yc_command(update_user_cmd, env)
         else:
             logger.info(f"Creating new user {db_name}")
             create_user_cmd = [
@@ -171,7 +170,7 @@ def _create_database_and_user(db_name: str) -> Tuple[str, str, str]:
                 "--cluster-id", cluster_id,
                 "--password", password
             ]
-            subprocess.check_call(create_user_cmd, env=env, stderr=subprocess.PIPE)
+            _run_yc_command(create_user_cmd, env)
 
         # Check if database exists
         logger.debug(f"Checking if database {db_name} exists")
@@ -181,8 +180,8 @@ def _create_database_and_user(db_name: str) -> Tuple[str, str, str]:
             "--format", "json"
         ]
 
-        dbs_output = subprocess.check_output(list_dbs_cmd, env=env, stderr=subprocess.PIPE)
-        databases = json.loads(dbs_output)
+        result = _run_yc_command(list_dbs_cmd, env)
+        databases = json.loads(result.stdout)
 
         db_exists = any(db["name"] == db_name for db in databases)
 
@@ -195,7 +194,7 @@ def _create_database_and_user(db_name: str) -> Tuple[str, str, str]:
                 "--cluster-id", cluster_id,
                 "--owner", db_name
             ]
-            subprocess.check_call(create_db_cmd, env=env, stderr=subprocess.PIPE)
+            _run_yc_command(create_db_cmd, env)
         else:
             logger.info(f"Database {db_name} already exists")
 
@@ -205,12 +204,9 @@ def _create_database_and_user(db_name: str) -> Tuple[str, str, str]:
         logger.info(f"Successfully ensured database and user {db_name} in Yandex Cloud PostgreSQL")
         return host, database_url, password
 
-    except subprocess.CalledProcessError as e:
-        error_msg = f"Failed during database and user operations: {str(e)}"
-        if hasattr(e, 'stderr') and e.stderr:
-            error_msg += f"\nError output: {e.stderr.decode('utf-8', errors='replace')}"
-        logger.error(error_msg)
-        raise YandexCloudDBError(error_msg)
+    except YandexCloudDBError:
+        # No need to wrap the error, just re-raise
+        raise
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise YandexCloudDBError(f"Unexpected error: {str(e)}")
@@ -535,3 +531,50 @@ def check_database_exists(db_name: str) -> bool:
                 os.unlink(temp_file.name)
             except Exception as e:
                 logger.warning(f"Failed to remove temporary file {temp_file.name}: {str(e)}")
+
+
+def _run_yc_command(cmd, env):
+    """
+    Run a Yandex Cloud CLI command with proper error handling and logging.
+
+    Args:
+        cmd: Command list to execute
+        env: Environment variables dictionary
+
+    Returns:
+        The completed process object
+
+    Raises:
+        YandexCloudDBError: If command execution fails
+    """
+    try:
+        logger.debug(f"Executing YC command: {' '.join(cmd)}")
+        result = subprocess.run(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        return result
+    except subprocess.CalledProcessError as e:
+        error_msg = f"YC command failed: {e}"
+        stderr = e.stderr if e.stderr else "No stderr output"
+        stdout = e.stdout if e.stdout else "No stdout output"
+
+        logger.error(f"Command failed: {' '.join(cmd)}")
+        logger.error(f"Exit code: {e.returncode}")
+        logger.error(f"Stderr: {stderr}")
+        logger.error(f"Stdout: {stdout}")
+
+        # Save error output to a file for debugging
+        with open('/tmp/yc_db_error.log', 'w') as f:
+            f.write(f"Command: {' '.join(cmd)}\n")
+            f.write(f"Return code: {e.returncode}\n")
+            f.write(f"Stderr output:\n{stderr}\n")
+            f.write(f"Stdout output:\n{stdout}\n")
+
+        logger.error(f"Full error details saved to /tmp/yc_db_error.log")
+        error_msg += f"\nError output: {stderr}"
+        raise YandexCloudDBError(error_msg)
