@@ -34,7 +34,7 @@ export default function Settings() {
     const newTheme = event.target.value;
     setLocalThemeMode(newTheme);
     
-    // Безопасно обновляем глобальное состояние
+    // Safely update the global state
     if (themeContext?.setThemeMode) {
       themeContext.setThemeMode(newTheme);
     }

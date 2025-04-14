@@ -1,0 +1,7 @@
+---
+description: Keep the readme up to date
+globs: 
+alwaysApply: true
+---
+- Always update README.md after any significant changes
+- Always keep README.md in context

@@ -1,33 +1,33 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 
-// Типы тем
+// Theme types
 export const THEME_MODES = {
   LIGHT: 'light',
   DARK: 'dark',
   SYSTEM: 'system',
 };
 
-// Проверка окружения браузера
+// Check browser environment
 const isBrowser = typeof window !== 'undefined';
 
-// Значение по умолчанию
+// Default value
 const defaultThemeContextValue = {
   themeMode: THEME_MODES.SYSTEM,
   setThemeMode: () => {},
-  resolvedTheme: 'light', // Фактическая тема после разрешения системной
+  resolvedTheme: 'light', // Actual theme after system resolution
 };
 
-// Создаем контекст
+// Create context
 export const ThemeContext = createContext(defaultThemeContextValue);
 
-// Провайдер контекста
+// Theme provider
 export const ThemeProvider = ({ children }) => {
-  // Получаем сохраненную тему из localStorage
+  // Get saved theme from localStorage
   const [themeMode, setThemeMode] = useState(THEME_MODES.SYSTEM);
-  // Фактическая тема после разрешения системной
+  // Actual theme after system resolution
   const [resolvedTheme, setResolvedTheme] = useState(THEME_MODES.LIGHT);
 
-  // При инициализации проверяем сохраненную тему
+  // On initialization, check saved theme
   useEffect(() => {
     if (isBrowser) {
       const savedTheme = localStorage.getItem('themeMode');
@@ -37,20 +37,20 @@ export const ThemeProvider = ({ children }) => {
     }
   }, []);
 
-  // Сохраняем выбранную тему
+  // Save selected theme
   useEffect(() => {
     if (isBrowser) {
       localStorage.setItem('themeMode', themeMode);
     }
   }, [themeMode]);
 
-  // Определяем системную тему и разрешаем фактическую тему
+  // Determine system theme and resolve actual theme
   useEffect(() => {
     if (!isBrowser) return;
     
     const updateResolvedTheme = () => {
       if (themeMode === THEME_MODES.SYSTEM) {
-        // Проверяем системные настройки
+        // Check system settings
         const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         setResolvedTheme(systemPrefersDark ? THEME_MODES.DARK : THEME_MODES.LIGHT);
       } else {
@@ -60,7 +60,7 @@ export const ThemeProvider = ({ children }) => {
 
     updateResolvedTheme();
 
-    // Слушаем изменения системной темы
+    // Listen for system theme changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => {
       if (themeMode === THEME_MODES.SYSTEM) {
@@ -68,14 +68,14 @@ export const ThemeProvider = ({ children }) => {
       }
     };
 
-    // Добавляем и удаляем слушатель
+    // Add and remove listener
     mediaQuery.addEventListener('change', handleChange);
     return () => {
       mediaQuery.removeEventListener('change', handleChange);
     };
   }, [themeMode]);
 
-  // Значение контекста
+  // Context value
   const contextValue = {
     themeMode,
     setThemeMode,
@@ -89,5 +89,5 @@ export const ThemeProvider = ({ children }) => {
   );
 };
 
-// Хук для использования темы
+// Hook for using theme
 export const useTheme = () => useContext(ThemeContext); 

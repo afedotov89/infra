@@ -19,11 +19,13 @@ RUN apt-get update \
     gcc \
     libpq-dev \
     netcat-traditional \
+    ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Установка зависимостей Python
 COPY requirements.txt /app/
+RUN pip install --no-cache-dir wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копирование кода приложения
@@ -45,4 +47,4 @@ EXPOSE 8080
 
 # Использование entrypoint-скрипта для запуска миграций и приложения
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["gunicorn", "project.wsgi:application", "--bind", "0.0.0.0:8080", "--workers", "3", "--timeout", "30"]
+CMD ["gunicorn", "project.wsgi:application", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "30", "--max-requests", "1000", "--max-requests-jitter", "100"]

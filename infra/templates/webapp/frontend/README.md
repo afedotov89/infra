@@ -1,4 +1,4 @@
-# Frontend Project
+# Frontend Boilerplate
 
 This project is built using Next.js with React and Material UI. It provides a solid foundation for a scalable web application with a professional structure.
 
@@ -11,29 +11,57 @@ frontend/
 ├── .eslintrc.json        # ESLint configuration specific to Next.js.
 ├── pages/                # Next.js pages directory.
 │   ├── _app.js           # Custom App component to integrate Material UI and global configurations.
-│   ├── index.js          # Sample homepage demonstrating usage of Material UI components.
+│   ├── index.js          # Homepage.
+│   ├── login.js          # Login page.
+│   ├── register.js       # Registration page.
 │   └── settings.js       # Settings page with theme mode configuration.
 ├── src/                  # Source code directory.
 │   ├── theme.js          # Material UI theme customization.
 │   ├── contexts/         # React contexts for state management.
-│   │   └── ThemeContext.js # Theme context for managing application theme settings.
-│   └── components/       # Directory for reusable React components.
-│       └── Header.js     # Header component with theme indicator and navigation.
+│   │   ├── ThemeContext.js # Theme context for managing application theme settings.
+│   │   └── AuthContext.js  # Authentication context for managing user session.
+│   ├── components/       # Directory for reusable React components.
+│   │   ├── Header.js     # Header component with theme indicator and navigation.
+│   │   └── FormField.js  # Reusable form field component.
+│   ├── api/              # API client modules.
+│   └── data/             # Data files for the application.
 ├── public/               # Static assets like images, fonts, etc.
 └── README.md             # This README file.
 ```
 
 ## Common Components
 
-The project includes a set of common reusable components located in the folder `src/components/`. These components are designed to promote consistency and reusability across the application. For example:
+The project includes a set of common reusable components located in the folder `src/components/`. These components are designed to promote consistency and reusability across the application:
 
-- **Header**: A modern, minimal header component that displays the application name "LangTask AI" and is rendered on all pages.
+- **Header**: A modern, minimal header component that is rendered on all pages.
+- **FormField**: A reusable form field component for standardized form inputs.
 
 ## Features
 
+- **Authentication**: Complete authentication system with login, registration, and session management.
 - **Theme Switching**: The application supports light, dark, and system themes. Users can change the theme from the settings page.
 - **Responsive Design**: Built with Material UI components for a responsive and mobile-friendly interface.
 - **Theme Persistence**: User's theme preference is saved to localStorage and persists between sessions.
+- **CSRF Protection**: Proper CSRF token handling for secure form submissions.
+- **Google OAuth**: Integration with Google authentication (requires setup).
+
+## Authentication
+
+The frontend integrates with the Django backend's session-based authentication system.
+
+*   **State Management:**
+    *   `src/contexts/AuthContext.js`: Uses React Context API to manage global authentication state (`user`, `isAuthenticated`, `isLoading`).
+    *   Provides functions (`login`, `register`, `logout`, `loadUser`) that interact with the backend API endpoints.
+    *   The application is wrapped with `AuthProvider` in `pages/_app.js`.
+*   **API Client (`axios`):**
+    *   An `axios` instance (`apiClient` in `AuthContext.js`) is configured with:
+        *   `baseURL` pointing to the backend (e.g., `http://localhost:8000`).
+        *   `withCredentials: true` to automatically send/receive cookies.
+        *   Automatic CSRF protection enabled via `xsrfCookieName: 'csrftoken'`, `xsrfHeaderName: 'X-CSRFToken'`, and `withXSRFToken: true` to handle Django's CSRF requirements for POST/PUT/DELETE requests.
+*   **UI Components:**
+    *   `src/components/Header.js`: Conditionally renders Login/Register links or User Info/Logout button based on `isAuthenticated` state from `AuthContext`.
+    *   `pages/login.js`: Provides the login form, calls the `login` function from `AuthContext`.
+    *   `pages/register.js`: Provides the registration form, calls the `register` function from `AuthContext`.
 
 ## Getting Started
 
@@ -41,11 +69,20 @@ The project includes a set of common reusable components located in the folder `
    ```bash
    npm install
    ```
-2. Run the development server:
+
+2. Configure API endpoint:
+   Create a `.env.local` file in the project root with the following content:
+   ```
+   NEXT_PUBLIC_API_BASE_URL=http://your-api-server-url
+   ```
+   By default, it tries to connect to `http://localhost:8000` if no value is provided.
+
+3. Run the development server:
    ```bash
    npm run dev
    ```
-3. Open [http://localhost:3000](http://localhost:3000) in your browser to view the application.
+
+4. Open [http://localhost:3000](http://localhost:3000) in your browser to view the application.
 
 ## Available Scripts
 
@@ -53,9 +90,3 @@ The project includes a set of common reusable components located in the folder `
 - `npm run build` - Builds the application for production.
 - `npm run start` - Starts the production server.
 - `npm run lint`  - Lints the codebase using ESLint.
-
-## Additional Notes
-
-- The project leverages Next.js for efficient server-side rendering and routing.
-- Material UI is used to create a responsive and modern user interface.
-- ESLint is configured with Next.js core web vitals to maintain code quality and consistency.

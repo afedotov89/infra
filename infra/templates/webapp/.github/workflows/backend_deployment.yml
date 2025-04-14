@@ -33,6 +33,7 @@ jobs:
           tags: cr.yandex/${{ secrets.YC_REGISTRY_ID }}/${{ secrets.YC_CONTAINER_NAME }}:${{ github.sha }},cr.yandex/${{ secrets.YC_REGISTRY_ID }}/${{ secrets.YC_CONTAINER_NAME }}:latest
           cache-from: type=registry,ref=cr.yandex/${{ secrets.YC_REGISTRY_ID }}/${{ secrets.YC_CONTAINER_NAME }}:latest
           cache-to: type=inline
+          platforms: linux/amd64,linux/arm64
 
       - name: Install Yandex Cloud CLI
         run: |
@@ -63,18 +64,15 @@ jobs:
           # Note: --acl=public-read makes the bucket contents publicly readable.
           # Adjust ACL or rely on API Gateway SA permissions if needed.
 
-      - name: Upload static files to Yandex Cloud Object Storage
+      - name: Upload static files to Yandex Cloud Object Storage with Retry
         uses: yc-actions/yc-obj-storage-upload@v2
         with:
           yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
-          bucket: ${{ secrets.YC_STATIC_BUCKET_NAME }} # Use the new secret for the static bucket
-          root: ./backend_static/ # Root directory containing static files
+          bucket: ${{ secrets.YC_STATIC_BUCKET_NAME }}
+          root: ./backend_static/
+          prefix: static
           include: "**/*"
-          prefix: "static/" # Upload files under the 'static/' prefix in the bucket
-          # Set appropriate cache headers for static files
           cache-control: |
-            *.js, *.css: public, max-age=31536000, immutable
-            *.png, *.jpg, *.jpeg, *.gif, *.svg, *.ico: public, max-age=31536000
             *: public, max-age=3600
 
       - name: Prepare Allowed Hosts
@@ -104,6 +102,7 @@ jobs:
           echo "Final ALLOWED_HOSTS for deployment: ${FINAL_ALLOWED_HOSTS}"
           echo "::set-output name=dynamic_hosts::${FINAL_ALLOWED_HOSTS}"
 
+      # Возвращаем деплой через yc CLI из-за необходимости указания network-id
       - name: Deploy to Yandex Serverless Containers
         env:
           YC_CONTAINER_NAME: ${{ secrets.YC_CONTAINER_NAME }}
@@ -113,138 +112,60 @@ jobs:
           DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
           CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
           YC_SERVICE_ACCOUNT_ID: ${{ secrets.YC_SERVICE_ACCOUNT_ID }}
-          YC_NETWORK_ID: ${{ secrets.YC_NETWORK_ID }}
+          YC_NETWORK_ID: ${{ secrets.YC_NETWORK_ID }} # Важный параметр для доступа к БД
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          SITE_URL: ${{ secrets.SITE_URL }}
         run: |
+          # Устанавливаем/настраиваем yc CLI, если еще не сделано
+          if ! command -v yc &> /dev/null; then curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash; echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH; fi
+          if ! $HOME/yandex-cloud/bin/yc config profile get sa-profile &> /dev/null; then echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > sa-key.json; $HOME/yandex-cloud/bin/yc config profile create sa-profile; $HOME/yandex-cloud/bin/yc config set service-account-key sa-key.json; $HOME/yandex-cloud/bin/yc config set folder-id ${{ secrets.YC_FOLDER_ID }}; fi
+
           # Создаем или обновляем контейнер
           $HOME/yandex-cloud/bin/yc serverless container revisions deploy \
             --container-name "${YC_CONTAINER_NAME}" \
             --image "cr.yandex/${YC_REGISTRY_ID}/${YC_CONTAINER_NAME}:${{ github.sha }}" \
             --folder-id "${YC_FOLDER_ID}" \
-            --memory 1GB \
+            --memory 512MB \
             --cores 1 \
             --concurrency 8 \
             --execution-timeout 60s \
             --network-id "${YC_NETWORK_ID}" \
+            --min-instances 1 \
             --environment DJANGO_SETTINGS_MODULE=project.settings \
             --environment DATABASE_URL="${DATABASE_URL}" \
             --environment SECRET_KEY="${DJANGO_SECRET_KEY}" \
             --environment ALLOWED_HOSTS="${{ steps.prepare_hosts.outputs.dynamic_hosts }}" \
             --environment DEBUG=False \
             --environment CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS}" \
+            --environment STATIC_URL=/api/static/ \
+            --environment OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
+            --environment OPENAI_API_KEY="${OPENAI_API_KEY}" \
+            --environment GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
+            --environment GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
+            --environment SITE_URL="${SITE_URL}" \
             --service-account-id "${YC_SERVICE_ACCOUNT_ID}"
 
-          # Получаем URL контейнера
-          CONTAINER_URL=$($HOME/yandex-cloud/bin/yc serverless container get "${YC_CONTAINER_NAME}" --format json | jq -r '.url')
-          echo "Deployed container URL: $CONTAINER_URL"
-
-          # Сохраняем URL контейнера для использования в следующих шагах
-          echo "CONTAINER_URL=$CONTAINER_URL" >> $GITHUB_ENV
-
-          echo "Миграции запускаются автоматически при старте контейнера через entrypoint.sh"
-          echo "Ожидаем 10 секунд, чтобы контейнер инициализировался и запустил миграции..."
-          sleep 10
-
-      - name: Update or Create API Gateway
+      - name: Get Deployed Container URL
+        id: get_container_url
         env:
           YC_CONTAINER_NAME: ${{ secrets.YC_CONTAINER_NAME }}
-          YC_FOLDER_ID: ${{ secrets.YC_FOLDER_ID }}
-          YC_API_GATEWAY_NAME: ${{ secrets.YC_API_GATEWAY_NAME }}
-          YC_SERVICE_ACCOUNT_ID: ${{ secrets.YC_SERVICE_ACCOUNT_ID }}
         run: |
-          # Получаем ID ревизии контейнера
-          CONTAINER_ID=$($HOME/yandex-cloud/bin/yc serverless container get "${YC_CONTAINER_NAME}" --format json | jq -r '.id')
+          # Убедимся, что yc CLI установлен и настроен
+          if ! command -v yc &> /dev/null; then curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash; echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH; fi
+          if ! $HOME/yandex-cloud/bin/yc config profile get sa-profile &> /dev/null; then echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > sa-key.json; $HOME/yandex-cloud/bin/yc config profile create sa-profile; $HOME/yandex-cloud/bin/yc config set service-account-key sa-key.json; $HOME/yandex-cloud/bin/yc config set folder-id ${{ secrets.YC_FOLDER_ID }}; fi
 
-          # Создаем временный файл спецификации API Gateway
-          cat > api-gw-spec.yaml << EOF
-          openapi: 3.0.0
-          info:
-            title: Django Backend API
-            version: 1.0.0
-          paths:
-            /static/{proxy+}: # Route for static files
-              get: # Explicitly use GET method for static files
-                parameters:
-                  - name: proxy
-                    in: path
-                    required: true
-                    schema:
-                      type: string
-                x-yc-apigateway-integration:
-                  type: object_storage
-                  bucket: "${{ secrets.YC_STATIC_BUCKET_NAME }}" # Bucket with static files
-                  object: "static/{proxy}" # Map URL path to object key including prefix
-                  presigned_redirect: false # Serve files directly
-                  # service_account_id: "${YC_SERVICE_ACCOUNT_ID}" # Uncomment if bucket access requires SA
-            /: # Route for root path to container
-              get:
-                x-yc-apigateway-integration:
-                  type: serverless_containers
-                  container_id: $CONTAINER_ID
-                  service_account_id: "${YC_SERVICE_ACCOUNT_ID}"
-              post:
-                x-yc-apigateway-integration:
-                  type: serverless_containers
-                  container_id: $CONTAINER_ID
-                  service_account_id: "${YC_SERVICE_ACCOUNT_ID}"
-            /{path+}: # Catch-all for other paths to container
-              x-yc-apigateway-any-method:
-                parameters:
-                  - name: path
-                    in: path
-                    required: true
-                    schema:
-                      type: string
-                x-yc-apigateway-integration:
-                  type: serverless_containers
-                  container_id: $CONTAINER_ID
-                  service_account_id: "${YC_SERVICE_ACCOUNT_ID}"
-          EOF
+          CONTAINER_URL=$($HOME/yandex-cloud/bin/yc serverless container get "${YC_CONTAINER_NAME}" --format json | jq -r '.url')
+          echo "Deployed container URL: $CONTAINER_URL"
+          echo "CONTAINER_URL=$CONTAINER_URL" >> $GITHUB_ENV
 
-          # Проверяем, существует ли API Gateway
-          API_GATEWAY_EXISTS=$($HOME/yandex-cloud/bin/yc serverless api-gateway list --format=json | jq -r --arg name "${YC_API_GATEWAY_NAME}" '.[] | select(.name==$name) | .id')
-
-          if [ -z "$API_GATEWAY_EXISTS" ]; then
-            echo "API Gateway '${YC_API_GATEWAY_NAME}' не существует, создаем..."
-            $HOME/yandex-cloud/bin/yc serverless api-gateway create \
-              --name "${YC_API_GATEWAY_NAME}" \
-              --spec api-gw-spec.yaml \
-              --folder-id "${YC_FOLDER_ID}"
-          else
-            echo "API Gateway '${YC_API_GATEWAY_NAME}' существует, обновляем..."
-            $HOME/yandex-cloud/bin/yc serverless api-gateway update "${YC_API_GATEWAY_NAME}" \
-              --spec api-gw-spec.yaml \
-              --folder-id "${YC_FOLDER_ID}"
-          fi
-
-          # Получаем URL API Gateway
-          API_GW_URL=$($HOME/yandex-cloud/bin/yc serverless api-gateway get "${YC_API_GATEWAY_NAME}" --format json | jq -r '.domain')
-          echo "API Gateway URL: $API_GW_URL"
-
-          # Сохраняем URL API Gateway для использования в следующих шагах
-          echo "API_GW_URL=$API_GW_URL" >> $GITHUB_ENV
-
-      - name: Health check
+      - name: Wait for container initialization
         run: |
-          echo "Проверяем доступность сервиса через API Gateway: https://$API_GW_URL"
+          echo "Миграции запускаются автоматически при старте контейнера через entrypoint.sh"
+          echo "Ожидаем 10 секунд, чтобы контейнер инициализировался..."
+          sleep 10
 
-          # Пробуем получить ответ от сервиса
-          MAX_RETRIES=10
-          COUNT=0
-          while [ $COUNT -lt $MAX_RETRIES ]; do
-            # Проверяем эндпоинт /health/
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$API_GW_URL/health/")
-
-            if [ "$HTTP_STATUS" = "200" ]; then
-              echo "Сервис запущен и готов к работе!"
-              break
-            else
-              echo "Получен статус $HTTP_STATUS, ожидаем готовности сервиса... (${COUNT}/${MAX_RETRIES})"
-              sleep 5
-              COUNT=$((COUNT+1))
-            fi
-          done
-
-          if [ $COUNT -eq $MAX_RETRIES ]; then
-            echo "Сервис не запустился после $MAX_RETRIES попыток!"
-            exit 1
-          fi
+      # Шаги получения ID контейнера, обновления API Gateway и Health Check удалены.
+      # Управление API Gateway вынесено в отдельный workflow: update_api_gateway.yml

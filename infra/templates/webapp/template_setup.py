@@ -56,6 +56,11 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
     ctx.github_secrets['YC_STATIC_BUCKET_NAME'] = f"{project_name}-static"
     ctx.github_secrets['YC_CONTAINER_NAME'] = f"{project_name}-backend"
     ctx.github_secrets['CORS_ALLOWED_ORIGINS'] = f"https://{project_name}.website.yandexcloud.net"
+    ctx.github_secrets['SITE_URL'] = f"https://{project_name}.website.yandexcloud.net"
+
+    # Add local development variables to project_env
+    ctx.project_env['CORS_ALLOWED_ORIGINS'] = "http://localhost:3000"
+    ctx.project_env['SITE_URL'] = "http://localhost:8000"
 
     # Generate Django Secret Key
     alphabet = string.ascii_letters + string.digits + string.punctuation
@@ -92,6 +97,14 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
 def _setup_frontend(ctx: 'ProjectSetupContext'):
     """Performs setup steps for the frontend environment."""
     logger.debug("Starting frontend setup.")
+    project_name = ctx.name
+    ctx.github_secrets['YC_FRONTEND_CONTAINER_NAME'] = f"{project_name}-frontend"
+    ctx.github_secrets['DOMAIN_NAME'] = f"{project_name}.website.yandexcloud.net"
+
+    # Generate NextAuth Secret
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    nextauth_secret = ''.join(secrets.choice(alphabet) for i in range(50))
+    ctx.github_secrets['NEXTAUTH_SECRET'] = nextauth_secret
 
     # Determine frontend directory relative to the original project root
     frontend_dir = Path(ctx.project_dir) / 'frontend'
