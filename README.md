@@ -44,8 +44,10 @@ This project provides a set of tools and scripts for automating the infrastructu
 
    # Activate the virtual environment
    poetry shell
+   # After activating the environment, you can run commands directly
+   infra --help
 
-   # Or run commands directly
+   # Or run commands without activating the environment
    poetry run infra --help
    ```
 
