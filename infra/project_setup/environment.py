@@ -496,5 +496,15 @@ def setup_bucket(ctx: 'ProjectSetupContext', bucket_name: str) -> bool:
         return True
     log_func(f"   Bucket '{bucket_name}' does not exist. Proceeding with creation...")
     logger.info(f"Bucket {bucket_name} does not exist. Creating new bucket.")
-    create_bucket(ctx, bucket_name)
-    log_func(f"✅ Bucket '{bucket_name}' created successfully.")
+    result = create_bucket(ctx, bucket_name)
+    if result:
+        log_func(f"✅ Bucket '{bucket_name}' created successfully.")
+    else:
+        # Check if it might exist despite creation failure (happens with "AlreadyExists" errors)
+        if check_bucket_exists(bucket_name):
+            log_func(f"ℹ️ Bucket '{bucket_name}' already exists (detected after creation attempt).")
+            return True
+        else:
+            log_func(f"❌ Failed to create bucket '{bucket_name}'. Check logs for details.")
+            return False
+    return result

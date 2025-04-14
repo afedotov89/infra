@@ -62,14 +62,21 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
     ctx.github_secrets['CORS_ALLOWED_ORIGINS'] = f"https://{project_name}.website.yandexcloud.net"
     ctx.github_secrets['SITE_URL'] = f"https://{project_name}.website.yandexcloud.net"
 
+
+    # Create Yandex Cloud bucket for Django static files using environment module
+    bucket_name = f"{project_name}-static"
+    result = setup_bucket(ctx, bucket_name)
+    logger.info(f"Bucket creation attempt for {bucket_name}: {'successful' if result else 'failed or bucket already exists'}.")
+
+
     # Add local development variables to project_env
     local_env = ProjectEnv(Path(ctx.project_dir) / 'backend' / '.env')
     local_env.set_var('CORS_ALLOWED_ORIGINS', "http://localhost:3000")
     local_env.set_var('SITE_URL', "http://localhost:8000")
 
-    # Generate Django Secret Key
-    alphabet = string.ascii_letters + string.digits + string.punctuation
-    django_key = ''.join(secrets.choice(alphabet) for i in range(50))
+    # Generate Django Secret Key - using only safe characters
+    safe_chars = string.ascii_letters + string.digits + '-_!@#$%^&*()[]{}|;:,.<>?'
+    django_key = ''.join(secrets.choice(safe_chars) for i in range(50))
     ctx.github_secrets['DJANGO_SECRET_KEY'] = django_key
 
     logger.info(f"Set YC infrastructure secrets and generated Django key for project: {project_name}")
@@ -109,14 +116,15 @@ def _setup_frontend(ctx: 'ProjectSetupContext'):
     ctx.github_secrets['YC_BUCKET_NAME'] = project_name
     ctx.github_secrets['DOMAIN_NAME'] = f"{project_name}.website.yandexcloud.net"
 
-    # Create Yandex Cloud bucket for static files using environment module
-    bucket_name = f"{project_name}-static"
+    # Create Yandex Cloud bucket for Django static files using environment module
+    bucket_name = f"{project_name}"
     result = setup_bucket(ctx, bucket_name)
     logger.info(f"Bucket creation attempt for {bucket_name}: {'successful' if result else 'failed or bucket already exists'}.")
 
-    # Generate NextAuth Secret
-    alphabet = string.ascii_letters + string.digits + string.punctuation
-    nextauth_secret = ''.join(secrets.choice(alphabet) for i in range(50))
+
+    # Generate NextAuth Secret - using only safe characters
+    safe_chars = string.ascii_letters + string.digits + '-_!@#$%^&*()[]{}|;:,.<>?'
+    nextauth_secret = ''.join(secrets.choice(safe_chars) for i in range(50))
     ctx.github_secrets['NEXTAUTH_SECRET'] = nextauth_secret
 
     # Determine frontend directory relative to the original project root
