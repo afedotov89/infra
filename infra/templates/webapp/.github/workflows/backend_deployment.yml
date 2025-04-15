@@ -53,7 +53,8 @@ jobs:
           docker cp temp_static_container:/app/staticfiles ./backend_static
           docker rm temp_static_container
           echo "Static files extracted to ./backend_static"
-          ls -R ./backend_static # Optional: list files for debugging
+          find ./backend_static -type f | wc -l
+          ls -la ./backend_static
 
       - name: Create static bucket if not exists
         env:
@@ -61,16 +62,15 @@ jobs:
         run: |
           echo "Attempting to create bucket: ${BUCKET_NAME}"
           $HOME/yandex-cloud/bin/yc storage bucket create "${BUCKET_NAME}" --default-storage-class=standard --acl=public-read || echo "Bucket already exists or failed to create (error ignored)"
-          # Note: --acl=public-read makes the bucket contents publicly readable.
-          # Adjust ACL or rely on API Gateway SA permissions if needed.
+          $HOME/yandex-cloud/bin/yc storage bucket list
 
       - name: Upload static files to Yandex Cloud Object Storage with Retry
+        timeout-minutes: 10
         uses: yc-actions/yc-obj-storage-upload@v2
         with:
           yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
           bucket: ${{ secrets.YC_STATIC_BUCKET_NAME }}
-          root: ./backend_static/
-          prefix: static
+          root: ./backend_static
           include: "**/*"
           cache-control: |
             *: public, max-age=3600

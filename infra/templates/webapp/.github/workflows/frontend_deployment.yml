@@ -302,6 +302,7 @@ jobs:
 
       # Загружаем статические файлы в Object Storage с повторными попытками
       - name: Upload Static Files to Yandex Cloud Object Storage
+        timeout-minutes: 10
         uses: yc-actions/yc-obj-storage-upload@v2
         with:
           yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
@@ -419,12 +420,4 @@ jobs:
       #       *: no-cache
 
       # Шаг установки provisioned instances удален, используется флаг --min-instances при деплое
-      # - name: Set Provisioned Instances Count to 1 (Frontend)
-
-      # - name: List frontend directory contents before build # Этот шаг теперь бессмысленен, т.к. build происходит в другом job
-      #   run: |
-      #      echo "Listing contents of frontend directory after artifact download:"
-      #      ls -la frontend/
-      #      echo "Listing contents of root directory:"
-      #      ls -la ./
 
