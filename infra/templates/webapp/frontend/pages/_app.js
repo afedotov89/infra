@@ -88,7 +88,7 @@ export default function App(props) {
     <>
       <Head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>LangMaster AI</title>
+        <title>React App</title>
       </Head>
       <ThemeProvider>
         <AuthProvider>
