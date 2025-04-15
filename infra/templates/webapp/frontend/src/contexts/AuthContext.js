@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useContext, useCallback, useRef } from 'react';
 import axios from 'axios';
+import Cookies from 'js-cookie';
 
 // Get backend URL from environment variable or default
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
@@ -41,14 +42,14 @@ export const AuthProvider = ({ children }) => {
     const requestInterceptor = apiClient.interceptors.request.use(
       (config) => {
         const method = config.method.toLowerCase();
-        // Add CSRF token to state-changing methods if token exists
         if (['post', 'put', 'patch', 'delete'].includes(method)) {
-          const currentToken = csrfTokenRef.current;
+          let currentToken = csrfTokenRef.current;
+          if (!currentToken) {
+            // Если токена нет в состоянии, пробуем взять из cookie
+            currentToken = Cookies.get('csrftoken');
+          }
           if (currentToken) {
             config.headers['X-CSRFToken'] = currentToken;
-          } else {
-            // Optional: Log a warning if a state-changing request is made without a token
-            // console.warn('Attempting state-changing request without CSRF token.');
           }
         }
         return config;
@@ -148,7 +149,7 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     setIsLoading(true);
     try {
-      const payload = { email: userData.email, password1: userData.password1, password2: userData.password2 }; // Corrected: use 'password' as expected by default allauth registration
+      const payload = { email: userData.email, password1: userData.password1, password2: userData.password2 };
       const response = await apiClient.post('/api/v1/auth/registration/', payload);
       // Does not automatically log in user, so no need to loadUser here usually
       setIsLoading(false);
