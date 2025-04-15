@@ -148,7 +148,7 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     setIsLoading(true);
     try {
-      const payload = { email: userData.email, password: userData.password1, password2: userData.password2 }; // Corrected: use 'password' as expected by default allauth registration
+      const payload = { email: userData.email, password1: userData.password1, password2: userData.password2 }; // Corrected: use 'password' as expected by default allauth registration
       const response = await apiClient.post('/api/v1/auth/registration/', payload);
       // Does not automatically log in user, so no need to loadUser here usually
       setIsLoading(false);
