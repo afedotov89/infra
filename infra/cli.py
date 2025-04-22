@@ -33,6 +33,11 @@ PROJECT_TEMPLATES = {
         "technologies": ["react", "django", "postgres"],
         "details": "React frontend with Django backend and Postgres database"
     },
+    "landing": {
+        "description": "Static landing page",
+        "technologies": ["react", "nextjs"],
+        "details": "Static landing page with Next.js"
+    },
     "zero": {
         "description": "Empty project template",
         "technologies": [],

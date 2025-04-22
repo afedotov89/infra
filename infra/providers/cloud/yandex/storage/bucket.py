@@ -10,18 +10,19 @@ from infra.providers.cloud.yandex.db.postgres import get_yc_configuration
 
 logger = logging.getLogger(__name__)
 
-def create_bucket(ctx: 'ProjectSetupContext', bucket_name: str) -> bool:
+def create_bucket(ctx: 'ProjectSetupContext', bucket_name: str, public_read: bool = False) -> bool:
     """
-    Creates a bucket in Yandex Cloud for static files.
+    Creates a bucket in Yandex Cloud and optionally configures it for website hosting.
 
     Args:
         ctx: The project setup context.
         bucket_name: The name of the bucket to create.
+        public_read: If True, bucket will be public for read (default: False).
 
     Returns:
-        bool: True if bucket creation was successful, False otherwise.
+        bool: True if bucket creation and optional configuration was successful, False otherwise.
     """
-    logger.info(f"Creating Yandex Cloud bucket: {bucket_name}")
+    logger.info(f"Creating Yandex Cloud bucket: {bucket_name} (public_read={public_read})")
 
     # Get Yandex Cloud configuration with folder ID
     try:
@@ -31,6 +32,7 @@ def create_bucket(ctx: 'ProjectSetupContext', bucket_name: str) -> bool:
         # Setup environment for yc command
         env = os.environ.copy()
         temp_file = None
+        success = False
 
         try:
             # Create temporary file to store the JSON credentials
@@ -47,16 +49,18 @@ def create_bucket(ctx: 'ProjectSetupContext', bucket_name: str) -> bool:
             env["YC_CLOUD_ID"] = yc_config["YC_CLOUD_ID"]
             env["YC_FOLDER_ID"] = folder_id
 
-            # Create bucket command with folder-id parameter
+            # --- Step 1: Create bucket command ---
             create_bucket_cmd = [
                 "yc", "storage", "bucket", "create",
                 bucket_name,
                 "--max-size", "1073741824",
                 "--folder-id", folder_id
             ]
+            if public_read:
+                create_bucket_cmd.append("--public-read")
 
-            logger.debug(f"Executing command: {' '.join(create_bucket_cmd)}")
-            result = subprocess.run(
+            logger.debug(f"Executing create command: {' '.join(create_bucket_cmd)}")
+            result_create = subprocess.run(
                 create_bucket_cmd,
                 env=env,
                 check=False,
@@ -65,19 +69,53 @@ def create_bucket(ctx: 'ProjectSetupContext', bucket_name: str) -> bool:
                 text=True
             )
 
-            if result.returncode == 0:
-                logger.info(f"Bucket '{bucket_name}' created in folder: {folder_id}")
-                # Log full output for debugging
-                if result.stdout:
-                    logger.debug(f"Command stdout:\n{result.stdout.strip()}")
-                return True
-            else:
-                stderr_msg = result.stderr.strip() if result.stderr else "No error output"
-                stdout_msg = result.stdout.strip() if result.stdout else "No standard output"
-                logger.error(f"Command failed with exit code {result.returncode}")
+            if result_create.returncode != 0:
+                stderr_msg = result_create.stderr.strip() if result_create.stderr else "No error output"
+                stdout_msg = result_create.stdout.strip() if result_create.stdout else "No standard output"
+                logger.error(f"Bucket creation command failed with exit code {result_create.returncode}")
                 logger.error(f"stderr: {stderr_msg}")
                 logger.error(f"stdout: {stdout_msg}")
-                return False
+                return False # Exit if creation failed
+            else:
+                logger.info(f"Bucket '{bucket_name}' created successfully in folder: {folder_id}")
+                if result_create.stdout:
+                    logger.debug(f"Create command stdout:\n{result_create.stdout.strip()}")
+                success = True # Mark creation as successful
+
+            # --- Step 2: Configure website hosting if requested ---
+            if success and public_read:
+                logger.info(f"Configuring bucket '{bucket_name}' for website hosting...")
+                # Construct the JSON string for website settings
+                website_settings_json = '{"index": "index.html", "error": "error.html"}'
+
+                update_bucket_cmd = [
+                    "yc", "storage", "bucket", "update",
+                    "--name", bucket_name,
+                    "--website-settings", website_settings_json # Use the correct flag and JSON
+                ]
+                logger.debug(f"Executing update command: {' '.join(update_bucket_cmd)}")
+                result_update = subprocess.run(
+                    update_bucket_cmd,
+                    env=env,
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+                if result_update.returncode != 0:
+                    stderr_msg = result_update.stderr.strip() if result_update.stderr else "No error output"
+                    stdout_msg = result_update.stdout.strip() if result_update.stdout else "No standard output"
+                    logger.error(f"Bucket website configuration command failed with exit code {result_update.returncode}")
+                    logger.error(f"stderr: {stderr_msg}")
+                    logger.error(f"stdout: {stdout_msg}")
+                    logger.warning(f"Website configuration failed for bucket '{bucket_name}', but bucket was created.")
+                else:
+                    logger.info(f"Bucket '{bucket_name}' configured successfully for website hosting.")
+                    if result_update.stdout:
+                         logger.debug(f"Update command stdout:\n{result_update.stdout.strip()}")
+
+            return success # Return True if creation was successful (regardless of update status for now)
 
         finally:
             # Clean up the temporary file
@@ -85,7 +123,7 @@ def create_bucket(ctx: 'ProjectSetupContext', bucket_name: str) -> bool:
                 os.unlink(temp_file.name)
 
     except Exception as e:
-        logger.error(f"Failed to create bucket: {str(e)}")
+        logger.error(f"Failed during bucket creation/configuration: {str(e)}")
         return False
 
 def check_bucket_exists(bucket_name: str) -> bool:

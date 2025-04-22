@@ -65,7 +65,7 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
 
     # Create Yandex Cloud bucket for Django static files using environment module
     bucket_name = f"{project_name}-static"
-    result = setup_bucket(ctx, bucket_name)
+    result = setup_bucket(ctx, bucket_name, public_read=True)
     logger.info(f"Bucket creation attempt for {bucket_name}: {'successful' if result else 'failed or bucket already exists'}.")
 
 
@@ -87,7 +87,7 @@ def _setup_backend(ctx: 'ProjectSetupContext') -> str:
 
     # Create a context specific to the backend setup
     backend_ctx = copy.deepcopy(ctx)
-    backend_ctx.project_dir = str(backend_dir) # Update project_dir
+    backend_ctx.project_dir = backend_dir # Update project_dir
     backend_ctx.project_env = local_env.read()
     logger.debug(f"Created backend-specific context with project_dir: {backend_ctx.project_dir}")
 
@@ -118,7 +118,7 @@ def _setup_frontend(ctx: 'ProjectSetupContext'):
 
     # Create Yandex Cloud bucket for Django static files using environment module
     bucket_name = f"{project_name}"
-    result = setup_bucket(ctx, bucket_name)
+    result = setup_bucket(ctx, bucket_name, public_read=True)
     logger.info(f"Bucket creation attempt for {bucket_name}: {'successful' if result else 'failed or bucket already exists'}.")
 
 
@@ -133,7 +133,7 @@ def _setup_frontend(ctx: 'ProjectSetupContext'):
 
     # Create a context specific to the frontend setup
     frontend_ctx = copy.deepcopy(ctx)
-    frontend_ctx.project_dir = str(frontend_dir) # Update project_dir
+    frontend_ctx.project_dir = frontend_dir # Update project_dir
     logger.debug(f"Created frontend-specific context with project_dir: {frontend_ctx.project_dir}")
 
     # Call the centralized function with the frontend context

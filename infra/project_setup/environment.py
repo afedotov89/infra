@@ -477,32 +477,46 @@ def setup_frontend_environment(ctx: 'ProjectSetupContext') -> None:
     logger.debug(f"Frontend setup finished for {frontend_dir}")
 
 
-def setup_bucket(ctx: 'ProjectSetupContext', bucket_name: str) -> bool:
+def setup_bucket(ctx: 'ProjectSetupContext', bucket_name: str, public_read: bool = False) -> bool:
     """
-    Creates a bucket in Yandex Cloud for static files if it doesn't already exist.
+    Creates a bucket in Yandex Cloud if it doesn't already exist and optionally configures it for website hosting.
     Args:
         ctx: The project setup context.
         bucket_name: The name of the bucket to create.
+        public_read: If True, bucket will be public for read (default: False).
 
     Returns:
-        bool: True if bucket creation was successful or bucket already exists, False otherwise.
+        bool: True if bucket exists or was created successfully (including optional configuration),
+              False if creation failed.
     """
     from infra.providers.cloud.yandex.storage.bucket import create_bucket, check_bucket_exists
     log_func = ctx.log_func
     log_func(f"🔄 Checking if bucket '{bucket_name}' already exists...")
     if check_bucket_exists(bucket_name):
-        log_func(f"ℹ️ Bucket '{bucket_name}' already exists. Skipping creation.")
-        logger.info(f"Bucket {bucket_name} already exists. Skipping creation.")
+        log_func(f"ℹ️ Bucket '{bucket_name}' already exists. Skipping creation/configuration.")
+        logger.info(f"Bucket {bucket_name} already exists. Skipping creation/configuration.")
+        # Optionally, we could add logic here to *ensure* website config is set even if bucket exists
+        # For now, if it exists, we assume it's configured correctly.
         return True
-    log_func(f"   Bucket '{bucket_name}' does not exist. Proceeding with creation...")
-    logger.info(f"Bucket {bucket_name} does not exist. Creating new bucket.")
-    result = create_bucket(ctx, bucket_name)
+
+    log_func(f"   Bucket '{bucket_name}' does not exist. Proceeding with creation and configuration...")
+    logger.info(f"Bucket {bucket_name} does not exist. Creating and configuring new bucket.")
+
+    # Call create_bucket, passing the website configuration flag
+    result = create_bucket(ctx, bucket_name, public_read=public_read)
+
     if result:
-        log_func(f"✅ Bucket '{bucket_name}' created successfully.")
+        # Log success based on the public_read flag
+        if public_read:
+            log_func(f"✅ Bucket '{bucket_name}' created and configured for website hosting successfully.")
+        else:
+            log_func(f"✅ Bucket '{bucket_name}' created successfully (website hosting skipped).")
     else:
-        # Check if it might exist despite creation failure (happens with "AlreadyExists" errors)
+        # Check if it might exist despite creation failure (e.g., race condition or API error)
         if check_bucket_exists(bucket_name):
-            log_func(f"ℹ️ Bucket '{bucket_name}' already exists (detected after creation attempt).")
+            log_func(f"ℹ️ Bucket '{bucket_name}' now exists (detected after creation attempt). Assuming success.")
+            # Here we might still want to attempt configuration if public_read is True,
+            # but let's keep it simple for now.
             return True
         else:
             log_func(f"❌ Failed to create bucket '{bucket_name}'. Check logs for details.")

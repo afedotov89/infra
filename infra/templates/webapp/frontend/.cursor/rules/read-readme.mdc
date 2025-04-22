@@ -1,6 +1,0 @@
----
-description: read readme before coding
-globs: 
-alwaysApply: true
----
-- Read the readme file before coding to follow the guidelines used in the project.
