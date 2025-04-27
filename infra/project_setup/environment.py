@@ -509,6 +509,7 @@ def setup_bucket(ctx: 'ProjectSetupContext', bucket_name: str, public_read: bool
         # Log success based on the public_read flag
         if public_read:
             log_func(f"✅ Bucket '{bucket_name}' created and configured for website hosting successfully.")
+            log_func(f"   Public URL: https://{bucket_name}.website.yandexcloud.net/")
         else:
             log_func(f"✅ Bucket '{bucket_name}' created successfully (website hosting skipped).")
     else:
