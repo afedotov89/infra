@@ -30,12 +30,6 @@ def setup(ctx: 'ProjectSetupContext') -> None:
     logger.info(f"Bucket creation attempt for {bucket_name}: {'successful' if result else 'failed or bucket already exists'}.")
 
     # Setup minimal frontend environment (if needed)
-    frontend_dir = Path(ctx.project_dir) / 'frontend'
-    frontend_ctx = ctx
-    frontend_ctx.project_dir = frontend_dir
-
-    setup_frontend_environment(frontend_ctx)
-    if frontend_ctx.public_url:
-        ctx.public_url = frontend_ctx.public_url
+    setup_frontend_environment(ctx)
 
     logger.info("Template environment setup finished.")
