@@ -1,0 +1,57 @@
+name: Deploy Landing to Yandex Cloud Storage
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+      - '.github/workflows/frontend_deployment.yml'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual deployment'
+        required: false
+        default: 'Manual deploy of landing'
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: './package-lock.json'
+
+      - name: Install dependencies
+        working-directory: .
+        run: npm ci
+
+      - name: Build React App
+        working-directory: .
+        run: |
+          npm run build
+          if [ ! -d "build" ]; then
+            echo "❌ Build failed. Check logs for errors."
+            exit 1
+          fi
+
+      - name: Upload Static Files to Yandex Cloud Object Storage
+        timeout-minutes: 10
+        uses: yc-actions/yc-obj-storage-upload@v2
+        with:
+          yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+          bucket: ${{ secrets.YC_BUCKET_NAME }}
+          root: ./build/
+          include: "**/*"
+          cache-control: |
+            *.js, *.css: public, max-age=31536000, immutable
+            *.png, *.jpg, *.jpeg, *.gif, *.svg, *.ico: public, max-age=31536000
+            *.html: public, max-age=3600
+            *: public, max-age=3600
+

@@ -42,7 +42,13 @@ PROJECT_TEMPLATES = {
         "description": "Empty project template",
         "technologies": [],
         "details": "A blank project structure without any predefined technologies or dependencies"
+    },
+    "empty": {
+        "description": "Empty project template with React CI/CD",
+        "technologies": ["react"],
+        "details": "A blank project structure without any predefined technologies or dependencies"
     }
+
 }
 
 # All technologies used across templates

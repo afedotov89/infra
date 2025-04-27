@@ -91,6 +91,14 @@ def _setup_project_specific_environment(ctx: ProjectSetupContext) -> str:
             # Remove potentially cached module
             if module_name in sys.modules:
                 del sys.modules[module_name]
+            # Удаляем template_setup.py после выполнения (успешно или с ошибкой)
+            try:
+                template_setup_path.unlink()
+                logger.info(f"Deleted template setup script: {template_setup_path}")
+                ctx.log_func(f"🗑️ Deleted template_setup.py after setup.")
+            except Exception as e:
+                logger.warning(f"Could not delete template_setup.py: {e}")
+                ctx.log_func(f"⚠️ Could not delete template_setup.py: {e}")
     else:
         logger.info("No template_setup.py found. Skipping template-specific environment setup.")
         ctx.log_func("ℹ️ No template-specific setup script (template_setup.py) found.")
@@ -722,7 +730,6 @@ def _finalize_project_setup(
 
     log_func(f"\nℹ️ Local project directory: {ctx.project_dir}")
     log_func(f"ℹ️ GitHub repository: {repo_url}")
-    log_func(f"ℹ️ Project has been set up with: {', '.join(ctx.technologies)}")
 
     log_func(f"\n🚀 Project {ctx.name} is ready for development! 🚀")
 
