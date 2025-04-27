@@ -577,7 +577,7 @@ def _setup_github_secrets(ctx: ProjectSetupContext) -> None:
     # Use helper function to find secrets defined in workflow files
     required_secrets = find_github_secrets_in_workflow(project_dir)
     if not required_secrets:
-        log_func("ℹ️ No GitHub secrets found referenced in workflow files. Skipping secret setup.")
+        log_func("   No GitHub secrets found referenced in workflow files. Skipping secret setup.")
         logger.info(f"No required secrets found in workflows for {repo_name}. Skipping setup.")
         return
     log_func(f"   Secrets required by workflows: {', '.join(required_secrets)}")
@@ -728,8 +728,10 @@ def _finalize_project_setup(
     log_func = ctx.log_func # Get log_func from context
     log_func("🔄 Finalizing project setup...")
 
-    log_func(f"\nℹ️ Local project directory: {ctx.project_dir}")
-    log_func(f"ℹ️ GitHub repository: {repo_url}")
+    log_func(f"\nℹ️  Local project directory: {ctx.project_dir}")
+    log_func(f"ℹ️  GitHub repository: {repo_url}")
+    if ctx.public_url:
+        log_func(f"ℹ️  Public URL: {ctx.public_url}")
 
     log_func(f"\n🚀 Project {ctx.name} is ready for development! 🚀")
 
@@ -760,5 +762,5 @@ def _save_env_file(ctx: ProjectSetupContext) -> None:
         log_func(f"✅ Environment variables saved to {env_file_path}")
         logger.info(f"Saved environment variables to {env_file_path}")
     else:
-        log_func("ℹ️ No environment variables to save.")
+        log_func("   No environment variables to save.")
         logger.info("No environment variables found in setup context to save.")

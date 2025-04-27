@@ -426,7 +426,7 @@ def setup_frontend_environment(ctx: 'ProjectSetupContext') -> None:
 
     if not package_json_path.exists():
         logger.info(f"No {package_json_path} found in {frontend_dir}. Skipping frontend dependency setup.")
-        log_func(f"   ℹ️ No package.json found in '{frontend_dir}'. Skipping frontend setup.")
+        log_func(f"   No package.json found in '{frontend_dir}'. Skipping frontend setup.")
         return
 
     # Check if node_modules already exists and is populated
@@ -509,7 +509,7 @@ def setup_bucket(ctx: 'ProjectSetupContext', bucket_name: str, public_read: bool
         # Log success based on the public_read flag
         if public_read:
             log_func(f"✅ Bucket '{bucket_name}' created and configured for website hosting successfully.")
-            log_func(f"   Public URL: https://{bucket_name}.website.yandexcloud.net/")
+            ctx.public_url = f"https://{bucket_name}.website.yandexcloud.net/"
         else:
             log_func(f"✅ Bucket '{bucket_name}' created successfully (website hosting skipped).")
     else:

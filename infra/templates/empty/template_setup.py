@@ -35,5 +35,7 @@ def setup(ctx: 'ProjectSetupContext') -> None:
     frontend_ctx.project_dir = frontend_dir
 
     setup_frontend_environment(frontend_ctx)
+    if frontend_ctx.public_url:
+        ctx.public_url = frontend_ctx.public_url
 
     logger.info("Template environment setup finished.")

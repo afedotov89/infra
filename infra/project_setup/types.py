@@ -21,5 +21,6 @@ class ProjectSetupContext:
     project_env: Dict[str, str] = field(default_factory=dict, init=False)
     # Stores the names of secrets that *already exist* in the GitHub repo
     existing_github_secrets: Optional[List[str]] = None
+    public_url: Optional[str] = None
     # Store general database connection details
     # db_info: Optional[Dict[str, any]] = field(default=None, init=False)

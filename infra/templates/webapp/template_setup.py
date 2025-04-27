@@ -139,5 +139,8 @@ def _setup_frontend(ctx: 'ProjectSetupContext'):
     # Call the centralized function with the frontend context
     logger.info("Setting up frontend environment.")
     setup_frontend_environment(frontend_ctx)
+    if frontend_ctx.public_url:
+        ctx.public_url = frontend_ctx.public_url
+
 
     logger.debug("Frontend setup finished.")
