@@ -2,6 +2,7 @@
 Template-specific environment setup script for the 'landing' template.
 """
 
+import copy
 import logging
 from pathlib import Path
 import secrets
@@ -31,7 +32,7 @@ def setup(ctx: 'ProjectSetupContext') -> None:
 
     # Setup minimal frontend environment (if needed)
     frontend_dir = Path(ctx.project_dir) / 'frontend'
-    frontend_ctx = ctx
+    frontend_ctx = copy.deepcopy(ctx)
     frontend_ctx.project_dir = frontend_dir
 
     setup_frontend_environment(frontend_ctx)
