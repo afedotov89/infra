@@ -473,7 +473,7 @@ def setup_frontend_environment(ctx: 'ProjectSetupContext') -> None:
         log_func(f"   ❌ Failed to install frontend dependencies using {manager}. Check logs.")
         # Potentially re-raise or handle differently depending on desired flow
 
-    log_func(f"✅ Frontend setup finished for '{relative_frontend_dir}'.")
+    log_func(f"✅ Frontend setup finished for '{frontend_dir}'.")
     logger.debug(f"Frontend setup finished for {frontend_dir}")
 
 

@@ -38,6 +38,11 @@ PROJECT_TEMPLATES = {
         "technologies": ["react", "nextjs"],
         "details": "Static landing page with Next.js"
     },
+    "react": {
+        "description": "React project",
+        "technologies": ["react"],
+        "details": "React project"
+    },
     "zero": {
         "description": "Empty project template",
         "technologies": [],

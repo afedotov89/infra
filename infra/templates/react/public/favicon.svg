@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <!-- Rounded background -->
+  <rect width="128" height="128" rx="24" fill="#4A5568"/>
+
+  <!-- Simple geometric shapes - abstract cube/box design -->
+  <rect x="32" y="32" width="64" height="64" rx="8" fill="#CBD5E0"/>
+
+  <!-- Inner details - abstract lines -->
+  <path d="M40 64H88" stroke="#2D3748" stroke-width="6" stroke-linecap="round"/>
+  <path d="M64 40V88" stroke="#2D3748" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Circle accent -->
+  <circle cx="64" cy="64" r="12" fill="#4A5568" stroke="#CBD5E0" stroke-width="4"/>
+</svg>
