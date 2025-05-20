@@ -1,23 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Typography, Alert, Link } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
-import { useRouter } from 'next/router';
+import { useNavigate } from 'react-router-dom';
 
 const GoogleLoginButton = () => {
   const { googleLogin } = useAuth();
-  const router = useRouter();
+  const navigate = useNavigate();
   const buttonRef = useRef(null);
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const [error, setError] = useState(null);
   const [errorDetails, setErrorDetails] = useState(null);
 
   // Получаем Google Client ID из переменных окружения
-  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
   // Проверка наличия CLIENT_ID при монтировании компонента
   useEffect(() => {
     if (!googleClientId) {
-      console.error('NEXT_PUBLIC_GOOGLE_CLIENT_ID не определен в переменных окружения');
+      console.error('VITE_GOOGLE_CLIENT_ID не определен в переменных окружения');
       setError('Отсутствует Google Client ID. Пожалуйста, проверьте настройки приложения.');
     } else {
       console.log('Google Client ID доступен:', googleClientId.substring(0, 5) + '...');
@@ -58,7 +58,7 @@ const GoogleLoginButton = () => {
       setError(errorMessage);
       setErrorDetails(details);
     }
-  }, [googleLogin, router]);
+  }, [googleLogin, navigate]);
 
   // Загрузка скрипта Google один раз при монтировании
   useEffect(() => {

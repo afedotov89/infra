@@ -1,21 +1,18 @@
 # Frontend Boilerplate
 
-This project is built using Next.js with React and Material UI. It provides a solid foundation for a scalable web application with a professional structure.
+This project is built using Vite with React and Material UI. It provides a solid foundation for a scalable web application with a professional structure.
 
 ## Project Structure
 
 ```
 frontend/
-├── package.json          # Node.js project manifest with dependencies and scripts for Next.js, React, and Material UI.
-├── next.config.js        # Next.js configuration file.
-├── .eslintrc.json        # ESLint configuration specific to Next.js.
-├── pages/                # Next.js pages directory.
-│   ├── _app.js           # Custom App component to integrate Material UI and global configurations.
-│   ├── index.js          # Homepage.
-│   ├── login.js          # Login page.
-│   ├── register.js       # Registration page.
-│   └── settings.js       # Settings page with theme mode configuration.
+├── package.json          # Node.js project manifest with dependencies and scripts for Vite, React, and Material UI.
+├── vite.config.js        # Vite configuration file.
+├── .eslintrc.json        # ESLint configuration.
 ├── src/                  # Source code directory.
+│   ├── main.jsx          # Main entry point with React Router setup.
+│   ├── App.jsx           # Root App component with routing configuration.
+│   ├── index.css         # Global CSS.
 │   ├── theme.js          # Material UI theme customization.
 │   ├── contexts/         # React contexts for state management.
 │   │   ├── ThemeContext.js # Theme context for managing application theme settings.
@@ -23,6 +20,11 @@ frontend/
 │   ├── components/       # Directory for reusable React components.
 │   │   ├── Header.js     # Header component with theme indicator and navigation.
 │   │   └── FormField.js  # Reusable form field component.
+│   ├── pages/            # Application pages.
+│   │   ├── Home.jsx      # Homepage.
+│   │   ├── Login.jsx     # Login page.
+│   │   ├── Register.jsx  # Registration page.
+│   │   └── Settings.jsx  # Settings page with theme mode configuration.
 │   ├── api/              # API client modules.
 │   └── data/             # Data files for the application.
 ├── public/               # Static assets like images, fonts, etc.
@@ -52,7 +54,7 @@ The frontend integrates with the Django backend's session-based authentication s
 *   **State Management:**
     *   `src/contexts/AuthContext.js`: Uses React Context API to manage global authentication state (`user`, `isAuthenticated`, `isLoading`).
     *   Provides functions (`login`, `register`, `logout`, `loadUser`) that interact with the backend API endpoints.
-    *   The application is wrapped with `AuthProvider` in `pages/_app.js`.
+    *   The application is wrapped with `AuthProvider` in `src/App.jsx`.
 *   **API Client (`axios`):**
     *   An `axios` instance (`apiClient` in `AuthContext.js`) is configured with:
         *   `baseURL` pointing to the backend (e.g., `http://localhost:8000`).
@@ -60,8 +62,8 @@ The frontend integrates with the Django backend's session-based authentication s
         *   Automatic CSRF protection enabled via `xsrfCookieName: 'csrftoken'`, `xsrfHeaderName: 'X-CSRFToken'`, and `withXSRFToken: true` to handle Django's CSRF requirements for POST/PUT/DELETE requests.
 *   **UI Components:**
     *   `src/components/Header.js`: Conditionally renders Login/Register links or User Info/Logout button based on `isAuthenticated` state from `AuthContext`.
-    *   `pages/login.js`: Provides the login form, calls the `login` function from `AuthContext`.
-    *   `pages/register.js`: Provides the registration form, calls the `register` function from `AuthContext`.
+    *   `src/pages/Login.jsx`: Provides the login form, calls the `login` function from `AuthContext`.
+    *   `src/pages/Register.jsx`: Provides the registration form, calls the `register` function from `AuthContext`.
 
 ## Getting Started
 
@@ -73,7 +75,7 @@ The frontend integrates with the Django backend's session-based authentication s
 2. Configure API endpoint:
    Create a `.env.local` file in the project root with the following content:
    ```
-   NEXT_PUBLIC_API_BASE_URL=http://your-api-server-url
+   VITE_API_BASE_URL=http://your-api-server-url
    ```
    By default, it tries to connect to `http://localhost:8000` if no value is provided.
 
@@ -88,5 +90,5 @@ The frontend integrates with the Django backend's session-based authentication s
 
 - `npm run dev`   - Runs the application in development mode.
 - `npm run build` - Builds the application for production.
-- `npm run start` - Starts the production server.
+- `npm run preview` - Previews the production build locally.
 - `npm run lint`  - Lints the codebase using ESLint.

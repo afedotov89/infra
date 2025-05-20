@@ -8,7 +8,7 @@ import LightModeIcon from '@mui/icons-material/LightMode';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LoginIcon from '@mui/icons-material/Login';
 import LogoutIcon from '@mui/icons-material/Logout';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { Box, Tooltip, Container, Button, Menu, MenuItem, ListItemIcon, ListItemText, SvgIcon, CircularProgress } from '@mui/material';
 import { useTheme, THEME_MODES } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -177,7 +177,7 @@ const Header = () => {
             py: 1
           }}
         >
-          <Link href="/" passHref style={{ textDecoration: 'none', color: 'inherit', flexGrow: 1, paddingLeft: '0.75rem' }}>
+          <Link to="/" style={{ textDecoration: 'none', color: 'inherit', flexGrow: 1, paddingLeft: '0.75rem' }}>
             <Typography
               variant="h6"
               component="div"
@@ -191,7 +191,7 @@ const Header = () => {
           </Link>
 
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <Link href="/settings" passHref>
+            <Link to="/settings">
               <Button
                 variant="text"
                 startIcon={<SettingsIcon />}
@@ -234,7 +234,7 @@ const Header = () => {
               </>
             ) : (
               <>
-                <Link href="/login" passHref>
+                <Link to="/login">
                   <Button
                     variant="text"
                     startIcon={<LoginIcon />}
@@ -252,7 +252,7 @@ const Header = () => {
                     Login
                   </Button>
                 </Link>
-                <Link href="/register" passHref>
+                <Link to="/register">
                   <Button
                     variant="outlined"
                     sx={{

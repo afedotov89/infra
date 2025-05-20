@@ -275,7 +275,7 @@ def _setup_docker_database(ctx: 'ProjectSetupContext') -> None:
     # 1. Check if DATABASE_URL is already known in the project environment context
     if 'DATABASE_URL' in ctx.project_env:
         existing_url = ctx.project_env['DATABASE_URL']
-        log_func(f"ℹ️ DATABASE_URL is already present in project context. Skipping Docker DB setup.")
+        log_func(f"ℹ️ DATABASE_URL is already present in the local project context. Skipping Docker DB setup.")
         log_func(f"   Existing URL: {existing_url[:existing_url.find('@')] + '@...' if '@' in existing_url else existing_url}") # Log obfuscated URL
         logger.info(f"DATABASE_URL found in ctx.project_env for {project_name}. Skipping Docker DB setup.")
         return

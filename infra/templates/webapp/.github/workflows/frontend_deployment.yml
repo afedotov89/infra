@@ -70,7 +70,7 @@ jobs:
             echo "Неизвестный триггер, запускаем деплой по умолчанию"
           fi
 
-  # JOB 1: Сборка Next.js проекта
+  # JOB 1: Сборка Vite проекта
   build:
     needs: check_frontend_changes
     if: needs.check_frontend_changes.outputs.frontend_changed == 'true'
@@ -116,57 +116,31 @@ jobs:
             echo "Продолжаем сборку фронтенда"
           fi
 
-          # Создаем .env.production файл для Next.js сборки
+          # Создаем .env файл для Vite сборки
           cat > ./frontend/.env.production << EOF
-          NEXT_PUBLIC_API_BASE_URL=https://$API_GW_URL
-          NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+          VITE_API_BASE_URL=https://$API_GW_URL
+          VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
           # Другие переменные окружения для production
           EOF
 
           echo "Созданы переменные окружения для сборки фронтенда"
-          echo "NEXT_PUBLIC_API_BASE_URL установлен на https://$API_GW_URL"
+          echo "VITE_API_BASE_URL установлен на https://$API_GW_URL"
 
           # Сохраняем домен для использования в последующих шагах
           echo "api_gw_domain=$API_GW_URL" >> $GITHUB_OUTPUT
 
-      # Сборка Next.js в режиме export
-      - name: Build Next.js in Export Mode
+      # Сборка Vite проекта
+      - name: Build Vite Project
         working-directory: ./frontend
         run: |
-          # Убедимся, что в next.config.js включен output: 'export'
-          echo "Checking if next.config.js has output: 'export' set..."
-          CONFIG_FILE="next.config.js"
-          if [ -f "$CONFIG_FILE" ]; then
-            if grep -q "output: *'export'" "$CONFIG_FILE" || grep -q 'output: *"export"' "$CONFIG_FILE"; then
-              echo "Export mode already configured in $CONFIG_FILE"
-            else
-              echo "Adding output: 'export' to $CONFIG_FILE"
-              # Используем sed для добавления 'output: export,' внутрь объекта module.exports
-              if grep -q "module.exports = {" "$CONFIG_FILE"; then
-                 # Если есть module.exports = { ... }
-                 sed -i "s/module.exports = {/module.exports = { output: 'export',/" "$CONFIG_FILE"
-              elif grep -q "module.exports = nextConfig" "$CONFIG_FILE" && grep -q "const nextConfig = {" "$CONFIG_FILE"; then
-                 # Если есть const nextConfig = { ... }; module.exports = nextConfig;
-                 sed -i "s/const nextConfig = {/const nextConfig = { output: 'export',/" "$CONFIG_FILE"
-              else
-                 echo "Не удалось автоматически добавить output: 'export'. Проверьте $CONFIG_FILE вручную"
-                 exit 1
-              fi
-            fi
-          else
-             echo "Файл next.config.js не найден!"
-             exit 1
-          fi
-
-          # Запускаем сборку
           npm run build
 
-          # Проверяем наличие директории out
-          if [ -d "out" ]; then
-            echo "✅ Export completed successfully. Files in out directory:"
-            ls -la out
+          # Проверяем наличие директории dist
+          if [ -d "dist" ]; then
+            echo "✅ Build completed successfully. Files in dist directory:"
+            ls -la dist
           else
-            echo "❌ Export failed. Check logs for errors."
+            echo "❌ Build failed. Check logs for errors."
             exit 1
           fi
 
@@ -175,7 +149,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-static-build
-          path: ./frontend/out/
+          path: ./frontend/dist/
           retention-days: 1
 
   # JOB 2: Ожидание бэкенда, если он деплоится параллельно
@@ -329,14 +303,14 @@ jobs:
       #   with:
       #     context: ./frontend # Путь к папке с Dockerfile
       #     push: true
-      #     tags: cr.yandex/${{ secrets.YC_REGISTRY_ID }}/langmaster-frontend:${{ github.sha }} # Исправлено YC_CR_ID на YC_REGISTRY_ID
+      #     tags: cr.yandex/${{ secrets.YC_REGISTRY_ID }}/project-frontend:${{ github.sha }} # Исправлено YC_CR_ID на YC_REGISTRY_ID
       #     # Добавляем для более детальных логов сборки (покажет использование кэша)
       #     build-args: |
       #       BUILDKIT_PROGRESS=plain
 
       # - name: Extract static files from Docker image
       #   run: |
-      #     IMAGE_NAME="cr.yandex/${{ secrets.YC_REGISTRY_ID }}/langmaster-frontend:${{ github.sha }}"
+      #     IMAGE_NAME="cr.yandex/${{ secrets.YC_REGISTRY_ID }}/project-frontend:${{ github.sha }}"
       #     echo "Extracting static files from ${IMAGE_NAME}..."
       #     docker create --name temp_static_container ${IMAGE_NAME}
       #     # Извлекаем .next/static
@@ -381,7 +355,7 @@ jobs:
       #     # Деплоим ревизию
       #     $HOME/yandex-cloud/bin/yc serverless container revisions deploy \
       #       --container-name "${YC_CONTAINER_NAME}" \
-      #       --image "cr.yandex/${YC_REGISTRY_ID}/langmaster-frontend:${{ github.sha }}" \
+      #       --image "cr.yandex/${YC_REGISTRY_ID}/project-frontend:${{ github.sha }}" \
       #       --folder-id "${YC_FOLDER_ID}" \
       #       --memory 256MB \
       #       --cores 1 \

@@ -116,16 +116,16 @@ def _setup_frontend(ctx: 'ProjectSetupContext'):
     ctx.github_secrets['YC_BUCKET_NAME'] = project_name
     ctx.github_secrets['DOMAIN_NAME'] = f"{project_name}.website.yandexcloud.net"
 
-    # Create Yandex Cloud bucket for Django static files using environment module
+    # Create Yandex Cloud bucket for static files using environment module
     bucket_name = f"{project_name}"
     result = setup_bucket(ctx, bucket_name, public_read=True)
     logger.info(f"Bucket creation attempt for {bucket_name}: {'successful' if result else 'failed or bucket already exists'}.")
 
 
-    # Generate NextAuth Secret - using only safe characters
+    # Generate app secret - using only safe characters
     safe_chars = string.ascii_letters + string.digits + '-_!@#$%^&*()[]{}|;:,.<>?'
-    nextauth_secret = ''.join(secrets.choice(safe_chars) for i in range(50))
-    ctx.github_secrets['NEXTAUTH_SECRET'] = nextauth_secret
+    app_secret = ''.join(secrets.choice(safe_chars) for i in range(50))
+    ctx.github_secrets['APP_SECRET'] = app_secret
 
     # Determine frontend directory relative to the original project root
     frontend_dir = Path(ctx.project_dir) / 'frontend'

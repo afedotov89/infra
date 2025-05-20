@@ -13,6 +13,8 @@ class ProjectSetupContext:
     use_local_docker: bool
     project_dir: Path
     log_func: Callable
+    # Template name used for the project
+    template_name: Optional[str] = None
     # Dictionary to store arbitrary data from setup steps (kept for potential future use)
     step_data: Dict[str, any] = field(default_factory=dict, init=False)
     # Dictionary to store secrets intended for GitHub Actions

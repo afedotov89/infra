@@ -57,6 +57,27 @@ def _setup_project_specific_environment(ctx: ProjectSetupContext) -> str:
     final_db_name = ctx.db_name or ctx.name  # Default db name if not provided or overridden
     template_setup_path = ctx.project_dir / "template_setup.py"
 
+    # Check if template_setup.py exists in the project directory
+    if not template_setup_path.exists() and ctx.template_name:
+        # Construct path to template's setup file
+        template_dir = Path(__file__).parent.parent / "templates" / ctx.template_name
+        template_source_path = template_dir / "template_setup.py"
+
+        # If found in template directory, copy it to project directory
+        if template_source_path.exists():
+            logger.info(f"Found template setup script in template: {template_source_path}")
+            ctx.log_func(f"🔄 Copying template-specific setup script from template...")
+
+            import shutil
+            try:
+                shutil.copy2(template_source_path, template_setup_path)
+                logger.info(f"Copied template setup script to project directory")
+                ctx.log_func(f"✅ Copied template setup script to project directory")
+            except Exception as e:
+                logger.error(f"Failed to copy template setup script: {e}")
+                ctx.log_func(f"⚠️ Failed to copy template setup script: {e}")
+
+    # Now check again if template_setup.py exists (either originally or just copied)
     if template_setup_path.exists():
         logger.info(f"Found template setup script: {template_setup_path}")
         ctx.log_func(f"🔄 Running template-specific environment setup...")
@@ -116,7 +137,8 @@ def _initialize_setup_context(
     use_yandex_cloud: bool,
     use_local_docker: bool,
     project_dir: Path,
-    log_func: Callable
+    log_func: Callable,
+    template_name: Optional[str] = None
 ) -> ProjectSetupContext:
     """
     Initialize the project setup context and fetch existing GitHub secrets.
@@ -137,6 +159,8 @@ def _initialize_setup_context(
     :type project_dir: Path
     :param log_func: Function to use for logging
     :type log_func: Callable
+    :param template_name: Name of the template used, if any
+    :type template_name: Optional[str]
     :return: Initialized project setup context
     :rtype: ProjectSetupContext
     """
@@ -150,7 +174,8 @@ def _initialize_setup_context(
         use_yandex_cloud=use_yandex_cloud,
         use_local_docker=use_local_docker,
         project_dir=project_dir,
-        log_func=log_func
+        log_func=log_func,
+        template_name=template_name
     )
 
     # --- DEBUG LOG: Context ID --- #
@@ -285,7 +310,8 @@ def setup_project(
             use_yandex_cloud=use_yandex_cloud,
             use_local_docker=use_local_docker,
             project_dir=project_dir,
-            log_func=log
+            log_func=log,
+            template_name=template_name
         )
 
         # Pass context object to the function
