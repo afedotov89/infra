@@ -465,7 +465,7 @@ def setup_frontend_environment(ctx: 'ProjectSetupContext') -> None:
         # Execute the install command using the helper
         _run_command(install_command_args, cwd=frontend_dir, log_func=log_func)
         logger.info(f"Frontend dependencies installed successfully in {frontend_dir}")
-        log_func(f"   ✅ Frontend dependencies installed successfully using {manager}.")
+        log_func(f"✅ Frontend dependencies installed successfully using {manager}.")
 
     except Exception as e: # Catch errors from _run_command or other unexpected issues
         # Error logging is handled within _run_command, but add a summary here
