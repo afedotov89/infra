@@ -465,16 +465,16 @@ def setup_frontend_environment(ctx: 'ProjectSetupContext') -> None:
         # Execute the install command using the helper
         _run_command(install_command_args, cwd=frontend_dir, log_func=log_func)
         logger.info(f"Frontend dependencies installed successfully in {frontend_dir}")
-        log_func(f"✅ Frontend dependencies installed successfully using {manager}.")
+        log_func(f"Frontend dependencies installed successfully using {manager}.")
 
+        log_func(f"✅ Frontend setup finished for '{frontend_dir}'.")
+        logger.debug(f"Frontend setup finished for {frontend_dir}")
     except Exception as e: # Catch errors from _run_command or other unexpected issues
         # Error logging is handled within _run_command, but add a summary here
         logger.error(f"Failed to install frontend dependencies using {manager} in {frontend_dir}. Error: {e}", exc_info=True)
-        log_func(f"   ❌ Failed to install frontend dependencies using {manager}. Check logs.")
+        log_func(f"❌ Failed to install frontend dependencies using {manager}. Check logs.")
         # Potentially re-raise or handle differently depending on desired flow
 
-    log_func(f"✅ Frontend setup finished for '{frontend_dir}'.")
-    logger.debug(f"Frontend setup finished for {frontend_dir}")
 
 
 def setup_bucket(ctx: 'ProjectSetupContext', bucket_name: str, public_read: bool = False) -> bool:
