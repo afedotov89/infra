@@ -1,1 +1,1 @@
-git+https://github.com/afedotov89/django-assistant-bot.git@6cf4d45b9774443d3c990b19f3b18f3e85c121d8
+git+https://github.com/afedotov89/django-assistant-bot.git@4e86c1a4e64e5fbead2c30cb28b6a498d61d7d4a
